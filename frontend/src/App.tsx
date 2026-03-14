@@ -346,6 +346,10 @@ function AuthPage({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [signupStep, setSignupStep] = useState<'request' | 'verify'>('request')
+  const [signupOtp, setSignupOtp] = useState('')
+  const [signupOtpSentTo, setSignupOtpSentTo] = useState('')
+  const [signupResendCooldown, setSignupResendCooldown] = useState(0)
   const [showReset, setShowReset] = useState(false)
   const [resetStep, setResetStep] = useState<'request' | 'verify'>('request')
   const [resetBusy, setResetBusy] = useState(false)
@@ -370,6 +374,16 @@ function AuthPage({
 
     return () => clearInterval(timer)
   }, [resendCooldown])
+
+  useEffect(() => {
+    if (signupResendCooldown <= 0) return
+
+    const timer = setInterval(() => {
+      setSignupResendCooldown((prev) => (prev > 0 ? prev - 1 : 0))
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [signupResendCooldown])
 
   const requestResetOtp = async () => {
     if (!resetEmail.trim()) {
@@ -463,9 +477,42 @@ function AuthPage({
       }
 
       if (mode === 'signup') {
-        await apiRequest('/auth/register', 'POST', undefined, { name, email, password })
-        pushToast('success', 'Account created, please log in')
-        setMode('login')
+        if (signupStep === 'request') {
+          const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/register', 'POST', undefined, {
+            name,
+            email,
+            password,
+          })
+
+          setSignupStep('verify')
+          setSignupOtpSentTo(email.trim())
+          setSignupResendCooldown(30)
+          if (response?.dev_otp) {
+            setSignupOtp(response.dev_otp)
+            pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
+          } else {
+            pushToast('info', 'OTP sent to your email')
+          }
+        } else {
+          if (!signupOtp.trim()) {
+            pushToast('error', 'OTP is required to verify your email')
+            return
+          }
+
+          await apiRequest('/auth/register', 'POST', undefined, {
+            name,
+            email,
+            password,
+            otp: signupOtp,
+          })
+
+          pushToast('success', 'Account verified and created. Please sign in.')
+          setSignupStep('request')
+          setSignupOtp('')
+          setSignupOtpSentTo('')
+          setSignupResendCooldown(0)
+          setMode('login')
+        }
       }
 
     } catch (error) {
@@ -500,7 +547,20 @@ function AuthPage({
         <div className="auth-card">
           <div className="auth-tabs">
             <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null) }}>Sign In</button>
-            <button type="button" className={`auth-tab${mode === 'signup' ? ' active' : ''}`} onClick={() => { setMode('signup'); setAuthError(null) }}>Create Account</button>
+            <button
+              type="button"
+              className={`auth-tab${mode === 'signup' ? ' active' : ''}`}
+              onClick={() => {
+                setMode('signup')
+                setAuthError(null)
+                setSignupStep('request')
+                setSignupOtp('')
+                setSignupOtpSentTo('')
+                setSignupResendCooldown(0)
+              }}
+            >
+              Create Account
+            </button>
           </div>
 
           <form onSubmit={submit}>
@@ -519,8 +579,58 @@ function AuthPage({
               <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
             </div>
 
+            {mode === 'signup' && signupStep === 'verify' && (
+              <>
+                {signupOtpSentTo && (
+                  <p className="muted auth-reset-note">OTP sent to {signupOtpSentTo}</p>
+                )}
+                <div className="form-field">
+                  <label className="form-field-label">Signup OTP</label>
+                  <input className="form-input" value={signupOtp} onChange={(e) => setSignupOtp(e.target.value)} placeholder="Enter 6-digit OTP" required />
+                </div>
+                <div className="auth-reset-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={busy || signupResendCooldown > 0}
+                    onClick={async () => {
+                      if (!name.trim() || !email.trim() || password.length < 6) {
+                        pushToast('error', 'Enter valid name, email, and password first')
+                        return
+                      }
+
+                      try {
+                        const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/register', 'POST', undefined, {
+                          name,
+                          email,
+                          password,
+                        })
+                        setSignupResendCooldown(30)
+                        if (response?.dev_otp) {
+                          setSignupOtp(response.dev_otp)
+                          pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
+                        } else {
+                          pushToast('info', 'OTP resent to your email')
+                        }
+                      } catch (error) {
+                        pushToast('error', (error as Error).message)
+                      }
+                    }}
+                  >
+                    {signupResendCooldown > 0 ? `Resend in ${signupResendCooldown}s` : 'Resend OTP'}
+                  </button>
+                </div>
+              </>
+            )}
+
             <button type="submit" className="btn btn-primary auth-submit-btn" disabled={busy}>
-              {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
+              {busy
+                ? 'Please wait…'
+                : mode === 'login'
+                  ? 'Sign In'
+                  : signupStep === 'request'
+                    ? 'Send Verification OTP'
+                    : 'Verify & Create Account'}
             </button>
             {authError && (
               <div className="auth-error">{authError}</div>
