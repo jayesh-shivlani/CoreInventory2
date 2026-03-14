@@ -9,7 +9,7 @@ Live application: https://coreinventory.onrender.com
 - Monorepo with independent frontend and backend workspaces
 - React + TypeScript frontend (Vite)
 - Node.js + Express backend API
-- PostgreSQL database via `DATABASE_URL` (including Supabase)
+- PostgreSQL database via Supabase
 - OTP-supported authentication and role-aware user model
 - Render-ready deployment configuration
 
