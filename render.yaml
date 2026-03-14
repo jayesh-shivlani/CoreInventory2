@@ -9,6 +9,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NPM_CONFIG_PRODUCTION
+        value: false
       - key: JWT_SECRET
         generateValue: true
       - key: DB_PATH

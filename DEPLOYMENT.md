@@ -32,6 +32,10 @@ After first deploy, set env var:
 
 You can include multiple origins separated by commas.
 
+Also ensure this env var is set so frontend build dependencies are installed during Render build:
+
+- `NPM_CONFIG_PRODUCTION=false`
+
 ## 4. Verify deployment
 
 Check:
