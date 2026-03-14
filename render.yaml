@@ -12,12 +12,8 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: DB_PATH
-        value: /var/data/coreinventory.db
+        value: /tmp/coreinventory.db
       - key: ALLOWED_ORIGINS
         sync: false
       - key: FRONTEND_DIST_PATH
         value: ../frontend/dist
-    disk:
-      name: coreinventory-data
-      mountPath: /var/data
-      sizeGB: 1

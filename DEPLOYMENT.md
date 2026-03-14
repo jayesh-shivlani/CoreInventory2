@@ -4,7 +4,13 @@ This project can be deployed as a single web service that serves:
 
 - Backend API (`/api/*`)
 - Frontend React app (`/` and client routes)
-- SQLite database persisted on a Render Disk
+- SQLite database file
+
+## Important: Render Free Tier Limitation
+
+- Render free web services do not support attached disks.
+- On free tier, SQLite will be stored in `/tmp/coreinventory.db` and can be reset on restart/redeploy.
+- For persistent SQLite storage, upgrade to a paid plan and attach a disk.
 
 ## 1. Push repository to GitHub
 
@@ -38,6 +44,7 @@ Check:
 
 ## Notes
 
-- Database file is persisted at `/var/data/coreinventory.db` via Render Disk.
+- Free tier DB path is `/tmp/coreinventory.db` (ephemeral).
+- For persistent storage on paid plan, set `DB_PATH=/var/data/coreinventory.db` and attach a disk.
 - Backend auto-initializes schema and seed user on startup.
 - Frontend is built during deploy and served by backend from `frontend/dist`.
