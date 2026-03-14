@@ -46,5 +46,6 @@ Check:
 
 - Free tier DB path is `/tmp/coreinventory.db` (ephemeral).
 - For persistent storage on paid plan, set `DB_PATH=/var/data/coreinventory.db` and attach a disk.
+- Render build needs frontend devDependencies (TypeScript/Vite/types) to compile; `render.yaml` already uses `npm install --include=dev --prefix frontend`.
 - Backend auto-initializes schema and seed user on startup.
 - Frontend is built during deploy and served by backend from `frontend/dist`.
