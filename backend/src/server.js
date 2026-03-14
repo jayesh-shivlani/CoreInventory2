@@ -2,7 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
-const nodemailer = require('nodemailer')
+const { Resend } = require('resend')
 const fs = require('fs')
 const path = require('path')
 const { buildReference, ensureLocationByName, getDb, initDb } = require('./db')
@@ -12,34 +12,32 @@ const app = express()
 const PORT = Number(process.env.PORT || 4000)
 
 async function sendOtpEmail(toEmail, otp) {
-  const host = process.env.SMTP_HOST
-  const port = Number(process.env.SMTP_PORT || 587)
-  const user = process.env.SMTP_USER
-  const pass = process.env.SMTP_PASS
-  const from = process.env.FROM_EMAIL || user
-
-  if (!host || !user || !pass || !from) {
+  const resendKey = process.env.RESEND_API_KEY
+  if (!resendKey) {
     console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} is ${otp}`)
     return
   }
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: {
-      user,
-      pass,
-    },
-  })
+  const resend = new Resend(resendKey)
+  const from = process.env.FROM_EMAIL || 'onboarding@resend.dev'
 
-  await transporter.sendMail({
-    from,
-    to: toEmail,
-    subject: 'Core Inventory OTP for password reset',
-    text: `Your OTP code is ${otp}. It is required to reset your Core Inventory password.`,
-    html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to reset your Core Inventory password.</p>`,
-  })
+  try {
+    const response = await resend.emails.send({
+      from: from.includes('@') ? from : `Core Inventory <${from}>`,
+      to: toEmail,
+      subject: 'Core Inventory OTP for password reset',
+      text: `Your OTP code is ${otp}. It is required to reset your Core Inventory password.`,
+      html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to reset your Core Inventory password.</p>`,
+    })
+    
+    if (response.error) {
+      console.error('Resend returned an error:', response.error)
+      throw new Error(response.error.message || 'Email sending failed via Resend')
+    }
+  } catch (error) {
+    console.error('Email sending failed:', error)
+    throw new Error('Email service failed to deliver OTP')
+  }
 }
 
 const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || '')

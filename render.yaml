@@ -13,8 +13,8 @@ services:
         value: false
       - key: JWT_SECRET
         generateValue: true
-      - key: DB_PATH
-        value: /tmp/coreinventory.db
+      - key: DATABASE_URL
+        sync: false
       - key: ALLOWED_ORIGINS
         sync: false
       - key: FRONTEND_DIST_PATH

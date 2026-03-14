@@ -1,31 +1,60 @@
-const path = require('path')
-const fs = require('fs')
-const { open } = require('sqlite')
-const sqlite3 = require('sqlite3')
+const { Pool } = require('pg')
 const bcrypt = require('bcryptjs')
 
-const DB_PATH = process.env.DB_PATH || './data/coreinventory.db'
+const DB_URL = process.env.DATABASE_URL
 
-let dbPromise
+let pgPool
 
 async function getDb() {
-  if (!dbPromise) {
-    const fullPath = path.isAbsolute(DB_PATH)
-      ? DB_PATH
-      : path.join(process.cwd(), DB_PATH)
-
-    fs.mkdirSync(path.dirname(fullPath), { recursive: true })
-
-    dbPromise = open({
-      filename: fullPath,
-      driver: sqlite3.Database,
+  if (!pgPool) {
+    if (!DB_URL) {
+      console.warn('DATABASE_URL is not set. Database connection will fail unless provided.')
+    }
+    pgPool = new Pool({
+      connectionString: DB_URL,
+      ssl: {
+        rejectUnauthorized: false
+      }
     })
-
-    const db = await dbPromise
-    await db.exec('PRAGMA foreign_keys = ON;')
   }
 
-  return dbPromise
+  return {
+    get: async (sql, ...params) => {
+      let i = 1
+      const pgSql = sql.replace(/\?/g, () => '$' + (i++))
+      const text = pgSql.replace(/datetime\("now"\)/gi, 'NOW()')
+      const res = await pgPool.query(text, params)
+      return res.rows[0]
+    },
+    all: async (sql, ...params) => {
+      let i = 1
+      const pgSql = sql.replace(/\?/g, () => '$' + (i++))
+      const text = pgSql.replace(/datetime\("now"\)/gi, 'NOW()')
+      const res = await pgPool.query(text, params)
+      return res.rows
+    },
+    run: async (sql, ...params) => {
+      let i = 1
+      let pgSql = sql.replace(/\?/g, () => '$' + (i++))
+      const text = pgSql.replace(/datetime\("now"\)/gi, 'NOW()')
+      
+      const isInsert = text.trim().toUpperCase().startsWith('INSERT')
+      if (isInsert && !text.toUpperCase().includes('RETURNING') && !text.toUpperCase().includes('ON CONFLICT')) {
+        pgSql = text + ' RETURNING id'
+      } else {
+        pgSql = text
+      }
+
+      const res = await pgPool.query(pgSql, params)
+      return {
+        lastID: isInsert && res.rows.length > 0 ? res.rows[0].id : undefined,
+        changes: res.rowCount
+      }
+    },
+    exec: async (sql) => {
+      await pgPool.query(sql)
+    }
+  }
 }
 
 async function ensureLocationByName(db, name, type = 'Internal') {
@@ -55,7 +84,7 @@ async function initDb() {
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS Users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
@@ -64,13 +93,13 @@ async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS Locations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
       type TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS Products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       sku TEXT NOT NULL UNIQUE,
       category TEXT NOT NULL,
@@ -79,17 +108,17 @@ async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS Stock_Quants (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       product_id INTEGER NOT NULL,
       location_id INTEGER NOT NULL,
-      quantity REAL NOT NULL DEFAULT 0,
+      quantity NUMERIC NOT NULL DEFAULT 0,
       UNIQUE(product_id, location_id),
       FOREIGN KEY (product_id) REFERENCES Products(id) ON DELETE CASCADE,
       FOREIGN KEY (location_id) REFERENCES Locations(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS Operations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       reference_number TEXT,
       type TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'Draft',
@@ -97,30 +126,30 @@ async function initDb() {
       source_location_id INTEGER,
       destination_location_id INTEGER,
       created_by INTEGER,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (source_location_id) REFERENCES Locations(id),
       FOREIGN KEY (destination_location_id) REFERENCES Locations(id),
       FOREIGN KEY (created_by) REFERENCES Users(id)
     );
 
     CREATE TABLE IF NOT EXISTS Operation_Lines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       operation_id INTEGER NOT NULL,
       product_id INTEGER NOT NULL,
-      requested_quantity REAL NOT NULL,
-      done_quantity REAL NOT NULL DEFAULT 0,
+      requested_quantity NUMERIC NOT NULL,
+      done_quantity NUMERIC NOT NULL DEFAULT 0,
       FOREIGN KEY (operation_id) REFERENCES Operations(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES Products(id)
     );
 
     CREATE TABLE IF NOT EXISTS Stock_Ledger (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       product_id INTEGER NOT NULL,
       from_location_id INTEGER,
       to_location_id INTEGER,
-      quantity REAL NOT NULL,
+      quantity NUMERIC NOT NULL,
       operation_id INTEGER,
-      timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (product_id) REFERENCES Products(id),
       FOREIGN KEY (from_location_id) REFERENCES Locations(id),
       FOREIGN KEY (to_location_id) REFERENCES Locations(id),
@@ -129,7 +158,7 @@ async function initDb() {
   `)
 
   const userCountRow = await db.get('SELECT COUNT(*) AS count FROM Users')
-  if (!userCountRow || userCountRow.count === 0) {
+  if (!userCountRow || Number(userCountRow.count) === 0) {
     const hashed = await bcrypt.hash('demo12345', 10)
     await db.run(
       'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
