@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
+const dns = require('dns').promises
 const { Resend } = require('resend')
 const fs = require('fs')
 const path = require('path')
@@ -11,11 +12,37 @@ const { requireAuth, signToken } = require('./auth')
 const app = express()
 const PORT = Number(process.env.PORT || 4000)
 
-async function sendOtpEmail(toEmail, otp) {
+const OTP_TTL_MINUTES = Number(process.env.SIGNUP_OTP_TTL_MINUTES || 10)
+const STRICT_EMAIL_DOMAIN_CHECK = String(process.env.STRICT_EMAIL_DOMAIN_CHECK || 'false').toLowerCase() === 'true'
+const EXPOSE_DEV_OTP =
+  process.env.NODE_ENV !== 'production' &&
+  String(process.env.EXPOSE_DEV_OTP || 'true').toLowerCase() === 'true'
+
+function isValidEmailFormat(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
+}
+
+async function hasMxRecord(email) {
+  try {
+    const normalized = String(email || '').trim().toLowerCase()
+    const [, domain] = normalized.split('@')
+    if (!domain) return false
+    const records = await dns.resolveMx(domain)
+    return Array.isArray(records) && records.length > 0
+  } catch {
+    return false
+  }
+}
+
+function getOtpExpiryIso() {
+  return new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString()
+}
+
+async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) {
-    console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} is ${otp}`)
-    return
+    console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
+    return { delivered: false }
   }
 
   const resend = new Resend(resendKey)
@@ -25,17 +52,23 @@ async function sendOtpEmail(toEmail, otp) {
     const response = await resend.emails.send({
       from: from.includes('@') ? from : `Core Inventory <${from}>`,
       to: toEmail,
-      subject: 'Core Inventory OTP for password reset',
-      text: `Your OTP code is ${otp}. It is required to reset your Core Inventory password.`,
-      html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to reset your Core Inventory password.</p>`,
+      subject: `Core Inventory OTP for ${purpose}`,
+      text: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
+      html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
     })
     
     if (response.error) {
       console.error('Resend returned an error:', response.error)
       throw new Error(response.error.message || 'Email sending failed via Resend')
     }
+
+    return { delivered: true }
   } catch (error) {
     console.error('Email sending failed:', error)
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`) 
+      return { delivered: false }
+    }
     throw new Error('Email service failed to deliver OTP')
   }
 }
@@ -66,30 +99,103 @@ app.get('/api/health', async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body || {}
+    const { name, email, password, role, otp } = req.body || {}
+    const normalizedEmail = String(email || '').toLowerCase().trim()
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'name, email, and password are required' })
+    if (!normalizedEmail) {
+      return res.status(400).json({ message: 'email is required' })
     }
 
-    if (String(password).length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters' })
+    if (!isValidEmailFormat(normalizedEmail)) {
+      return res.status(400).json({ message: 'Please enter a valid email address' })
+    }
+
+    if (STRICT_EMAIL_DOMAIN_CHECK) {
+      const emailLooksDeliverable = await hasMxRecord(normalizedEmail)
+      if (!emailLooksDeliverable) {
+        return res.status(400).json({ message: 'Email domain is not valid for receiving emails' })
+      }
     }
 
     const db = await getDb()
-    const existing = await db.get('SELECT id FROM Users WHERE email = ?', String(email).toLowerCase())
+
+    const existing = await db.get('SELECT id FROM Users WHERE email = ?', normalizedEmail)
     if (existing) {
       return res.status(409).json({ message: 'Email already registered' })
     }
 
-    const hash = await bcrypt.hash(String(password), 10)
+    if (!otp) {
+      if (!name || !password) {
+        return res.status(400).json({ message: 'name, email, and password are required' })
+      }
+
+      if (String(password).length < 6) {
+        return res.status(400).json({ message: 'Password must be at least 6 characters' })
+      }
+
+      const hash = await bcrypt.hash(String(password), 10)
+      const generatedOtp = String(Math.floor(100000 + Math.random() * 900000))
+
+      await db.run(
+        `
+          INSERT INTO Signup_Verifications (email, name, password_hash, role, otp_code, otp_expires_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(email) DO UPDATE SET
+            name = excluded.name,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            otp_code = excluded.otp_code,
+            otp_expires_at = excluded.otp_expires_at
+        `,
+        normalizedEmail,
+        String(name).trim(),
+        hash,
+        role && typeof role === 'string' ? role : 'Warehouse Staff',
+        generatedOtp,
+        getOtpExpiryIso(),
+      )
+
+      try {
+        const delivery = await sendOtpEmail(normalizedEmail, generatedOtp, 'account sign up')
+        if (!delivery.delivered && EXPOSE_DEV_OTP) {
+          return res.status(202).json({
+            message: 'Signup OTP generated in development mode',
+            dev_otp: generatedOtp,
+          })
+        }
+      } catch (error) {
+        return res.status(500).json({ message: 'Failed to send signup OTP email. Please contact support.' })
+      }
+
+      return res.status(202).json({ message: 'Signup OTP sent to your email' })
+    }
+
+    const pending = await db.get(
+      'SELECT email, name, password_hash, role, otp_code, otp_expires_at FROM Signup_Verifications WHERE email = ?',
+      normalizedEmail,
+    )
+
+    if (!pending) {
+      return res.status(400).json({ message: 'No pending sign up found for this email. Request a new OTP.' })
+    }
+
+    if (String(otp).trim() !== String(pending.otp_code || '').trim()) {
+      return res.status(400).json({ message: 'Invalid signup OTP code' })
+    }
+
+    if (pending.otp_expires_at && new Date(pending.otp_expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ message: 'Signup OTP has expired. Request a new OTP.' })
+    }
+
     await db.run(
       'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
-      String(name).trim(),
-      String(email).toLowerCase().trim(),
-      hash,
-      role && typeof role === 'string' ? role : 'Warehouse Staff',
+      pending.name,
+      pending.email,
+      pending.password_hash,
+      pending.role,
     )
+
+    await db.run('DELETE FROM Signup_Verifications WHERE email = ?', normalizedEmail)
 
     return res.status(201).json({ message: 'Registered successfully' })
   } catch (error) {
@@ -140,7 +246,10 @@ app.post('/api/auth/reset-password', async (req, res) => {
       await db.run('UPDATE Users SET otp_code = ? WHERE id = ?', generatedOtp, user.id)
 
       try {
-        await sendOtpEmail(String(email).toLowerCase().trim(), generatedOtp)
+        const delivery = await sendOtpEmail(String(email).toLowerCase().trim(), generatedOtp, 'password reset')
+        if (!delivery.delivered && EXPOSE_DEV_OTP) {
+          return res.json({ message: 'OTP generated in development mode', dev_otp: generatedOtp })
+        }
       } catch (error) {
         return res.status(500).json({ message: 'Failed to send OTP email. Please contact support.' })
       }
@@ -215,16 +324,16 @@ app.get('/api/products', requireAuth, async (req, res) => {
     values.push(`%${search}%`, `%${search}%`, `%${search}%`)
   }
   if (category) {
-    conditions.push('p.category LIKE ?')
-    values.push(`%${category}%`)
+    conditions.push('p.category = ?')
+    values.push(category)
   }
   if (location) {
-    conditions.push('l.name LIKE ?')
-    values.push(`%${location}%`)
+    conditions.push('l.name = ?')
+    values.push(location)
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
-  const having = lowStockOnly ? 'HAVING availableStock <= p.reorder_minimum' : ''
+  const having = lowStockOnly ? 'HAVING COALESCE(SUM(sq.quantity), 0) <= p.reorder_minimum' : ''
 
   const rows = await db.all(
     `
@@ -249,6 +358,22 @@ app.get('/api/products', requireAuth, async (req, res) => {
   )
 
   res.json(rows)
+})
+
+app.get('/api/products/filter-options', requireAuth, async (req, res) => {
+  const db = await getDb()
+
+  const [categories, locations, uoms] = await Promise.all([
+    db.all("SELECT DISTINCT category FROM Products WHERE category IS NOT NULL AND category <> '' ORDER BY category"),
+    db.all("SELECT DISTINCT name FROM Locations WHERE name IS NOT NULL AND name <> '' ORDER BY name"),
+    db.all("SELECT DISTINCT unit_of_measure FROM Products WHERE unit_of_measure IS NOT NULL AND unit_of_measure <> '' ORDER BY unit_of_measure"),
+  ])
+
+  res.json({
+    categories: categories.map((x) => x.category).filter(Boolean),
+    locations: locations.map((x) => x.name).filter(Boolean),
+    uoms: uoms.map((x) => x.unit_of_measure).filter(Boolean),
+  })
 })
 
 app.post('/api/products', requireAuth, async (req, res) => {

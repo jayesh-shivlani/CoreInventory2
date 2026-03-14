@@ -25,6 +25,12 @@ type DashboardFilterResponse = {
   categories: string[]
 }
 
+type ProductFilterOptions = {
+  categories: string[]
+  locations: string[]
+  uoms: string[]
+}
+
 type Product = {
   id: number
   name: string
@@ -84,6 +90,9 @@ type OperationDraftLine = {
 
 const TOKEN_KEY = 'ims-auth-token'
 const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '/api').replace(/\/$/, '')
+const LIVE_SYNC_INTERVAL_MS = 8000
+const DEFAULT_UOMS = ['Units', 'Kg', 'L', 'Box', 'Pack', 'Piece']
+const DEFAULT_CATEGORIES = ['Raw Materials', 'Finished Goods', 'Consumables', 'Electronics', 'Hardware']
 
 const toOperationKind = (path: string): OperationKind => {
   if (path.includes('receipts')) return 'Receipt'
@@ -336,6 +345,9 @@ function AuthPage({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [signupOtp, setSignupOtp] = useState('')
+  const [signupVerificationPending, setSignupVerificationPending] = useState(false)
+  const [signupPendingEmail, setSignupPendingEmail] = useState('')
   const [showReset, setShowReset] = useState(false)
   const [resetStep, setResetStep] = useState<'request' | 'verify'>('request')
   const [resetBusy, setResetBusy] = useState(false)
@@ -369,13 +381,18 @@ function AuthPage({
 
     setResetBusy(true)
     try {
-      await apiRequest<{ message?: string }>('/auth/reset-password', 'POST', undefined, {
+      const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/reset-password', 'POST', undefined, {
         email: resetEmail,
       })
       setResetStep('verify')
       setOtpSentTo(resetEmail.trim())
       setResendCooldown(30)
-      pushToast('info', 'OTP sent to your email')
+      if (response?.dev_otp) {
+        setResetOtp(response.dev_otp)
+        pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
+      } else {
+        pushToast('info', 'OTP sent to your email')
+      }
     } catch (error) {
       pushToast('error', (error as Error).message)
     } finally {
@@ -448,9 +465,32 @@ function AuthPage({
       }
 
       if (mode === 'signup') {
-        await apiRequest('/auth/register', 'POST', undefined, { name, email, password })
-        pushToast('success', 'Account created, please log in')
-        setMode('login')
+        if (!signupVerificationPending) {
+          const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/register', 'POST', undefined, { name, email, password })
+          setSignupVerificationPending(true)
+          setSignupPendingEmail(email.trim().toLowerCase())
+          if (response?.dev_otp) {
+            setSignupOtp(response.dev_otp)
+            pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
+          } else {
+            pushToast('info', 'Signup OTP sent. Enter the OTP to complete account creation.')
+          }
+        } else {
+          if (!signupOtp.trim()) {
+            pushToast('error', 'Signup OTP is required')
+            return
+          }
+
+          await apiRequest('/auth/register', 'POST', undefined, {
+            email,
+            otp: signupOtp.trim(),
+          })
+          setSignupOtp('')
+          setSignupVerificationPending(false)
+          setSignupPendingEmail('')
+          pushToast('success', 'Account created, please log in')
+          setMode('login')
+        }
       }
 
     } catch (error) {
@@ -474,7 +514,7 @@ function AuthPage({
         </div>
 
         <div className="auth-tabs">
-          <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null) }}>Sign In</button>
+          <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null); setSignupOtp(''); setSignupVerificationPending(false); setSignupPendingEmail('') }}>Sign In</button>
           <button type="button" className={`auth-tab${mode === 'signup' ? ' active' : ''}`} onClick={() => { setMode('signup'); setAuthError(null) }}>Create Account</button>
         </div>
 
@@ -487,15 +527,27 @@ function AuthPage({
           )}
           <div className="form-field">
             <label className="form-field-label">Email Address</label>
-            <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
+            <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required disabled={mode === 'signup' && signupVerificationPending} />
           </div>
           <div className="form-field">
             <label className="form-field-label">Password</label>
-            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
+            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} disabled={mode === 'signup' && signupVerificationPending} />
           </div>
 
+          {mode === 'signup' && signupVerificationPending && (
+            <>
+              <div className="form-field">
+                <label className="form-field-label">Signup OTP</label>
+                <input className="form-input" value={signupOtp} onChange={(e) => setSignupOtp(e.target.value)} placeholder="6-digit code" required />
+              </div>
+              <p className="muted" style={{fontSize:'12px', marginTop:'-2px'}}>
+                OTP sent to {signupPendingEmail || email.trim().toLowerCase()}.
+              </p>
+            </>
+          )}
+
           <button type="submit" className="btn btn-primary" style={{width:'100%', padding:'9px 16px', marginTop:'8px'}} disabled={busy}>
-            {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : signupVerificationPending ? 'Verify & Create Account' : 'Send Signup OTP'}
           </button>
           {authError && (
             <div className="auth-error">{authError}</div>
@@ -631,8 +683,14 @@ function DashboardPage({
     }
     loadFilters()
     load()
+    const timer = setInterval(() => {
+      load()
+      loadFilters()
+    }, LIVE_SYNC_INTERVAL_MS)
+
     return () => {
       active = false
+      clearInterval(timer)
     }
   }, [query, token, pushToast])
 
@@ -703,6 +761,11 @@ function ProductsPage({
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
+  const [filterOptions, setFilterOptions] = useState<ProductFilterOptions>({
+    categories: [],
+    locations: [],
+    uoms: [],
+  })
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
@@ -759,9 +822,46 @@ function ProductsPage({
     }
   }
 
+  const loadFilterOptions = async () => {
+    try {
+      const data = await apiRequest<ProductFilterOptions>('/products/filter-options', 'GET', token ?? undefined)
+      setFilterOptions({
+        categories: Array.isArray(data?.categories) ? data.categories : [],
+        locations: Array.isArray(data?.locations) ? data.locations : [],
+        uoms: Array.isArray(data?.uoms) ? data.uoms : [],
+      })
+    } catch {
+      // Keep the page usable even if filter options cannot be loaded.
+    }
+  }
+
+  useEffect(() => {
+    loadFilterOptions()
+    load()
+  }, [token])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      load()
+      loadFilterOptions()
+    }, LIVE_SYNC_INTERVAL_MS)
+
+    return () => clearInterval(timer)
+  }, [search, filterCategory, filterLocation, lowStockOnly, token])
+
   useEffect(() => {
     load()
-  }, [])
+  }, [filterCategory, filterLocation, lowStockOnly])
+
+  const categoryOptions = useMemo(
+    () => Array.from(new Set([...DEFAULT_CATEGORIES, ...filterOptions.categories, category].filter(Boolean))),
+    [filterOptions.categories, category],
+  )
+
+  const uomOptions = useMemo(
+    () => Array.from(new Set([...DEFAULT_UOMS, ...filterOptions.uoms, uom].filter(Boolean))),
+    [filterOptions.uoms, uom],
+  )
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -805,6 +905,7 @@ function ProductsPage({
       }
 
       resetForm()
+      await loadFilterOptions()
       load()
       setViewMode('list')
     } catch (error) {
@@ -824,8 +925,18 @@ function ProductsPage({
           </div>
           <div className="list-toolbar">
             <input className="search-input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or SKU…" />
-            <input className="search-input" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} placeholder="Filter by category…" />
-            <input className="search-input" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)} placeholder="Filter by location…" />
+            <select className="form-select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+              <option value="">All categories</option>
+              {filterOptions.categories.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+            <select className="form-select" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
+              <option value="">All locations</option>
+              {filterOptions.locations.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
             <label className="checkbox-label">
               <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
               Low stock only
@@ -889,11 +1000,20 @@ function ProductsPage({
               </div>
               <div className="field-group">
                 <label className="field-label">Unit of Measure</label>
-                <input className="form-input" value={uom} onChange={(e) => setUom(e.target.value)} placeholder="e.g. Units, Kg, L" required />
+                <select className="form-select" value={uom} onChange={(e) => setUom(e.target.value)} required>
+                  {uomOptions.map((value) => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
               </div>
               <div className="field-group">
                 <label className="field-label">Category</label>
-                <input className="form-input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Electronics" required />
+                <select className="form-select" value={category} onChange={(e) => setCategory(e.target.value)} required>
+                  <option value="">Select category…</option>
+                  {categoryOptions.map((value) => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
               </div>
               <div className="field-group">
                 <label className="field-label">Reorder Minimum</label>
@@ -926,6 +1046,7 @@ function OperationsPage({
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list')
   const [operations, setOperations] = useState<Operation[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [locations, setLocations] = useState<Warehouse[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -934,15 +1055,24 @@ function OperationsPage({
   const [supplier, setSupplier] = useState('')
   const [lines, setLines] = useState<OperationDraftLine[]>([{ product_id: '', requested_quantity: '0' }])
 
+  const resetDraftForm = () => {
+    setLines([{ product_id: '', requested_quantity: '0' }])
+    setSupplier('')
+    setSourceLocation('')
+    setDestinationLocation('')
+  }
+
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [docs, productList] = await Promise.all([
+      const [docs, productList, locationList] = await Promise.all([
         apiRequest<Operation[]>(`/operations?type=${operationType}`, 'GET', token ?? undefined),
         apiRequest<Product[]>('/products', 'GET', token ?? undefined),
+        apiRequest<Warehouse[]>('/locations', 'GET', token ?? undefined),
       ])
       setOperations(Array.isArray(docs) ? docs : [])
       setProducts(Array.isArray(productList) ? productList : [])
+      setLocations(Array.isArray(locationList) ? locationList : [])
     } catch (error) {
       pushToast('error', (error as Error).message)
     } finally {
@@ -952,7 +1082,15 @@ function OperationsPage({
 
   useEffect(() => {
     fetchData()
-  }, [operationType])
+  }, [operationType, token])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      fetchData()
+    }, LIVE_SYNC_INTERVAL_MS)
+
+    return () => clearInterval(timer)
+  }, [operationType, token])
 
   const requiresSource = operationType === 'Delivery' || operationType === 'Internal'
   const requiresDestination = operationType === 'Internal'
@@ -969,8 +1107,7 @@ function OperationsPage({
       )
     })
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
+  const submit = async (mode: 'draft' | 'validate') => {
 
     if (!lines.length) {
       pushToast('error', 'Add at least one line')
@@ -1023,13 +1160,15 @@ function OperationsPage({
         })),
       })
 
-      await apiRequest(`/operations/${created.id}/validate`, 'POST', token ?? undefined)
-      pushToast('success', `${operationType} validated`)
-      setLines([{ product_id: '', requested_quantity: '0' }])
-      setSupplier('')
-      setSourceLocation('')
-      setDestinationLocation('')
-      fetchData()
+      if (mode === 'validate') {
+        await apiRequest(`/operations/${created.id}/validate`, 'POST', token ?? undefined)
+        pushToast('success', `${operationType} validated`)
+      } else {
+        pushToast('success', `${operationType} draft saved`)
+      }
+
+      resetDraftForm()
+      await fetchData()
       setViewMode('list')
     } catch (error) {
       pushToast('error', (error as Error).message)
@@ -1053,6 +1192,16 @@ function OperationsPage({
     })
   }
 
+  const validateOperation = async (operationId: number) => {
+    try {
+      await apiRequest(`/operations/${operationId}/validate`, 'POST', token ?? undefined)
+      pushToast('success', `${operationType} validated`)
+      await fetchData()
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    }
+  }
+
   const opLabel = operationType === 'Receipt' ? 'Receipts'
     : operationType === 'Delivery' ? 'Delivery Orders'
     : operationType === 'Internal' ? 'Internal Transfers'
@@ -1064,7 +1213,7 @@ function OperationsPage({
         <div className="list-card">
           <div className="list-header">
             <h2>{opLabel}</h2>
-            <button type="button" className="btn btn-primary" onClick={() => setViewMode('form')}>+ New</button>
+            <button type="button" className="btn btn-primary" onClick={() => { resetDraftForm(); setViewMode('form') }}>+ New</button>
           </div>
           <div className="data-table-wrap">
             <table className="data-table">
@@ -1075,11 +1224,12 @@ function OperationsPage({
                   <th>Source</th>
                   <th>Destination</th>
                   <th>Date</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr className="empty-row"><td colSpan={5}>Loading documents…</td></tr>}
-                {!loading && operations.length === 0 && <tr className="empty-row"><td colSpan={5}>No documents yet. Click "+ New" to create one.</td></tr>}
+                {loading && <tr className="empty-row"><td colSpan={6}>Loading documents…</td></tr>}
+                {!loading && operations.length === 0 && <tr className="empty-row"><td colSpan={6}>No documents yet. Click "+ New" to create one.</td></tr>}
                 {!loading && operations.map((op) => (
                   <tr key={op.id}>
                     <td><strong>{op.reference_number}</strong></td>
@@ -1089,6 +1239,13 @@ function OperationsPage({
                     <td>{op.source_location_name ?? '—'}</td>
                     <td>{op.destination_location_name ?? '—'}</td>
                     <td>{formatDate(op.created_at)}</td>
+                    <td>
+                      {op.status !== 'Done' ? (
+                        <button type="button" className="btn btn-secondary" onClick={() => validateOperation(op.id)}>Validate</button>
+                      ) : (
+                        <span className="muted">Done</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1098,15 +1255,17 @@ function OperationsPage({
       )}
 
       {viewMode === 'form' && (
-        <form onSubmit={submit}>
+        <form onSubmit={(e) => e.preventDefault()}>
           <div className="control-bar">
             <div className="control-bar-left">
-              <button className="btn btn-success" type="submit" disabled={saving}>{saving ? 'Validating…' : 'Validate'}</button>
+              <button className="btn btn-secondary" type="button" disabled={saving} onClick={() => { void submit('draft') }}>
+                {saving ? 'Saving…' : 'Save Draft'}
+              </button>
+              <button className="btn btn-success" type="button" disabled={saving || overRequested} onClick={() => { void submit('validate') }}>
+                {saving ? 'Validating…' : 'Validate'}
+              </button>
               <button type="button" className="btn btn-secondary" onClick={() => {
-                setLines([{ product_id: '', requested_quantity: '0' }])
-                setSupplier('')
-                setSourceLocation('')
-                setDestinationLocation('')
+                resetDraftForm()
                 setViewMode('list')
               }}>Discard</button>
             </div>
@@ -1134,19 +1293,34 @@ function OperationsPage({
               {requiresSource && (
                 <div className="field-group">
                   <label className="field-label">Source Location</label>
-                  <input className="form-input" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)} placeholder="e.g. Main Warehouse" required />
+                  <select className="form-select" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)} required>
+                    <option value="">Select source location…</option>
+                    {locations.map((item) => (
+                      <option key={item.id} value={item.name}>{item.name}</option>
+                    ))}
+                  </select>
                 </div>
               )}
               {requiresDestination && (
                 <div className="field-group">
                   <label className="field-label">Destination Location</label>
-                  <input className="form-input" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} placeholder="e.g. Production Floor" required />
+                  <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
+                    <option value="">Select destination location…</option>
+                    {locations.map((item) => (
+                      <option key={item.id} value={item.name}>{item.name}</option>
+                    ))}
+                  </select>
                 </div>
               )}
               {requiresAdjustmentLocation && (
                 <div className="field-group">
                   <label className="field-label">Inventory Location</label>
-                  <input className="form-input" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} placeholder="e.g. Main Warehouse" required />
+                  <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
+                    <option value="">Select location…</option>
+                    {locations.map((item) => (
+                      <option key={item.id} value={item.name}>{item.name}</option>
+                    ))}
+                  </select>
                 </div>
               )}
             </div>
@@ -1221,6 +1395,12 @@ function MoveHistoryPage({
       }
     }
     load()
+
+    const timer = setInterval(() => {
+      load()
+    }, LIVE_SYNC_INTERVAL_MS)
+
+    return () => clearInterval(timer)
   }, [token, pushToast])
 
   return (
@@ -1288,7 +1468,13 @@ function WarehousesPage({
 
   useEffect(() => {
     load()
-  }, [])
+
+    const timer = setInterval(() => {
+      load()
+    }, LIVE_SYNC_INTERVAL_MS)
+
+    return () => clearInterval(timer)
+  }, [token])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -1388,6 +1574,12 @@ function ProfilePage({
       }
     }
     load()
+
+    const timer = setInterval(() => {
+      load()
+    }, LIVE_SYNC_INTERVAL_MS)
+
+    return () => clearInterval(timer)
   }, [token, pushToast])
 
   return (

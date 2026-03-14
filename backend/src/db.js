@@ -92,6 +92,17 @@ async function initDb() {
       otp_code TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS Signup_Verifications (
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'Warehouse Staff',
+      otp_code TEXT NOT NULL,
+      otp_expires_at TIMESTAMP NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS Locations (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
