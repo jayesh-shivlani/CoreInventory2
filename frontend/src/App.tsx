@@ -170,12 +170,12 @@ function App() {
   return (
     <>
       <Routes>
+        <Route path="/" element={<Navigate to="/auth" replace />} />
         <Route
           path="/auth"
           element={<AuthPage token={token} onLogin={login} pushToast={pushToast} />}
         />
         <Route element={<ProtectedLayout token={token} onLogout={logout} />}>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route
             path="/dashboard"
             element={<DashboardPage token={token} pushToast={pushToast} />}
