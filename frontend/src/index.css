@@ -394,6 +394,27 @@ dd {
 .action-row {
   display: flex;
   justify-content: flex-start;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  width: fit-content;
+}
+
+.reset-box {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.7rem;
 }
 
 .tab {

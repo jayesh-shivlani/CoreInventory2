@@ -82,11 +82,6 @@ type OperationDraftLine = {
   requested_quantity: string
 }
 
-type ResetOtpResponse = {
-  message?: string
-  otp?: string
-}
-
 const TOKEN_KEY = 'ims-auth-token'
 const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '/api').replace(/\/$/, '')
 
@@ -282,14 +277,19 @@ function AuthPage({
   pushToast: (kind: Toast['kind'], text: string) => void
 }) {
   const navigate = useNavigate()
-  const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login')
+  const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [busy, setBusy] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
-  const [otp, setOtp] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [generatedOtp, setGeneratedOtp] = useState('')
+  const [showReset, setShowReset] = useState(false)
+  const [resetStep, setResetStep] = useState<'request' | 'verify'>('request')
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetOtp, setResetOtp] = useState('')
+  const [resetNewPassword, setResetNewPassword] = useState('')
+  const [otpSentTo, setOtpSentTo] = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
 
   useEffect(() => {
     if (token) {
@@ -297,26 +297,72 @@ function AuthPage({
     }
   }, [token, navigate])
 
-  const generateOtp = async () => {
-    if (!email.trim()) {
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0))
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [resendCooldown])
+
+  const requestResetOtp = async () => {
+    if (!resetEmail.trim()) {
       pushToast('error', 'Email is required')
       return
     }
 
-    setBusy(true)
+    setResetBusy(true)
     try {
-      const data = await apiRequest<ResetOtpResponse>('/auth/reset-password', 'POST', undefined, {
-        email,
+      await apiRequest<{ message?: string }>('/auth/reset-password', 'POST', undefined, {
+        email: resetEmail,
       })
-      if (data?.otp) {
-        setGeneratedOtp(data.otp)
-        setOtp(data.otp)
-      }
-      pushToast('info', data?.otp ? `OTP generated: ${data.otp}` : 'OTP generated. Check your reset channel.')
+      setResetStep('verify')
+      setOtpSentTo(resetEmail.trim())
+      setResendCooldown(30)
+      pushToast('info', 'OTP sent to your email')
     } catch (error) {
       pushToast('error', (error as Error).message)
     } finally {
-      setBusy(false)
+      setResetBusy(false)
+    }
+  }
+
+  const submitPasswordReset = async () => {
+    if (!resetEmail.trim()) {
+      pushToast('error', 'Email is required')
+      return
+    }
+    if (!resetOtp.trim()) {
+      pushToast('error', 'OTP is required')
+      return
+    }
+    if (resetNewPassword.length < 6) {
+      pushToast('error', 'New password must be at least 6 characters')
+      return
+    }
+
+    setResetBusy(true)
+    try {
+      await apiRequest('/auth/reset-password', 'POST', undefined, {
+        email: resetEmail,
+        otp: resetOtp,
+        newPassword: resetNewPassword,
+      })
+
+      pushToast('success', 'Password reset completed. Please sign in.')
+      setShowReset(false)
+      setResetStep('request')
+      setResetOtp('')
+      setResetNewPassword('')
+      setOtpSentTo('')
+      setResendCooldown(0)
+      setMode('login')
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setResetBusy(false)
     }
   }
 
@@ -326,7 +372,7 @@ function AuthPage({
       pushToast('error', 'Email is required')
       return
     }
-    if (mode !== 'reset' && password.length < 6) {
+    if (password.length < 6) {
       pushToast('error', 'Password must be at least 6 characters')
       return
     }
@@ -353,27 +399,6 @@ function AuthPage({
         setMode('login')
       }
 
-      if (mode === 'reset') {
-        if (!otp.trim()) {
-          pushToast('error', 'OTP is required. Click Generate OTP first if needed.')
-          return
-        }
-        if (newPassword.length < 6) {
-          pushToast('error', 'New password must be at least 6 characters')
-          return
-        }
-
-        await apiRequest('/auth/reset-password', 'POST', undefined, {
-          email,
-          otp,
-          newPassword,
-        })
-        pushToast('success', 'Password reset completed')
-        setGeneratedOtp('')
-        setOtp('')
-        setNewPassword('')
-        setMode('login')
-      }
     } catch (error) {
       pushToast('error', (error as Error).message)
     } finally {
@@ -393,9 +418,6 @@ function AuthPage({
           <button type="button" className={mode === 'signup' ? 'tab active' : 'tab'} onClick={() => setMode('signup')}>
             Sign Up
           </button>
-          <button type="button" className={mode === 'reset' ? 'tab active' : 'tab'} onClick={() => setMode('reset')}>
-            Reset OTP
-          </button>
         </div>
 
         <form className="form-grid" onSubmit={submit}>
@@ -409,45 +431,101 @@ function AuthPage({
             Email
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </label>
-          {mode !== 'reset' && (
-            <label>
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-              />
-            </label>
-          )}
-          {mode === 'reset' && (
-            <>
-              <label>
-                OTP Code
-                <input value={otp} onChange={(e) => setOtp(e.target.value)} />
-              </label>
-              <label>
-                New Password
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  minLength={6}
-                />
-              </label>
-              <div className="action-row">
-                <button type="button" className="ghost-btn" onClick={generateOtp} disabled={busy}>
-                  {busy ? 'Generating...' : 'Generate OTP'}
-                </button>
-              </div>
-              {generatedOtp && <p className="muted">Generated OTP: {generatedOtp}</p>}
-            </>
-          )}
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+          </label>
 
           <button type="submit" className="primary-btn" disabled={busy}>
-            {busy ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'signup' ? 'Create account' : 'Reset Password'}
+            {busy ? 'Please wait...' : mode === 'login' ? 'Login' : 'Create account'}
           </button>
+
+          {mode === 'login' && (
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                setShowReset((prev) => !prev)
+                setResetStep('request')
+                setResetOtp('')
+                setResetNewPassword('')
+                setResetEmail(email)
+                setOtpSentTo('')
+                setResendCooldown(0)
+              }}
+            >
+              {showReset ? 'Close reset password' : 'Reset password'}
+            </button>
+          )}
+
+          {mode === 'login' && showReset && (
+            <div className="reset-box">
+              <h3>Reset Password</h3>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  required
+                />
+              </label>
+
+              {resetStep === 'verify' && otpSentTo && (
+                <p className="muted">OTP sent to {otpSentTo}</p>
+              )}
+
+              {resetStep === 'verify' && (
+                <>
+                  <label>
+                    OTP Code
+                    <input value={resetOtp} onChange={(e) => setResetOtp(e.target.value)} required />
+                  </label>
+                  <label>
+                    New Password
+                    <input
+                      type="password"
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      minLength={6}
+                      required
+                    />
+                  </label>
+                </>
+              )}
+
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={requestResetOtp}
+                  disabled={resetBusy || resendCooldown > 0}
+                >
+                  {resetBusy
+                    ? resetStep === 'request'
+                      ? 'Sending...'
+                      : 'Sending again...'
+                    : resendCooldown > 0
+                      ? `Resend OTP in ${resendCooldown}s`
+                      : resetStep === 'request'
+                        ? 'Send OTP'
+                        : 'Resend OTP'}
+                </button>
+                {resetStep === 'verify' && (
+                  <button type="button" className="primary-btn" onClick={submitPasswordReset} disabled={resetBusy}>
+                    {resetBusy ? 'Resetting...' : 'Reset Password'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {import.meta.env.DEV && mode === 'login' && (
             <button
               type="button"

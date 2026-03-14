@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
+const nodemailer = require('nodemailer')
 const fs = require('fs')
 const path = require('path')
 const { buildReference, ensureLocationByName, getDb, initDb } = require('./db')
@@ -9,6 +10,36 @@ const { requireAuth, signToken } = require('./auth')
 
 const app = express()
 const PORT = Number(process.env.PORT || 4000)
+
+async function sendOtpEmail(toEmail, otp) {
+  const host = process.env.SMTP_HOST
+  const port = Number(process.env.SMTP_PORT || 587)
+  const user = process.env.SMTP_USER
+  const pass = process.env.SMTP_PASS
+  const from = process.env.FROM_EMAIL || user
+
+  if (!host || !user || !pass || !from) {
+    throw new Error('Email service is not configured')
+  }
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: {
+      user,
+      pass,
+    },
+  })
+
+  await transporter.sendMail({
+    from,
+    to: toEmail,
+    subject: 'Core Inventory OTP for password reset',
+    text: `Your OTP code is ${otp}. It is required to reset your Core Inventory password.`,
+    html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to reset your Core Inventory password.</p>`,
+  })
+}
 
 const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || '')
   .split(',')
@@ -108,7 +139,14 @@ app.post('/api/auth/reset-password', async (req, res) => {
     if (!otp || !newPassword) {
       const generatedOtp = String(Math.floor(100000 + Math.random() * 900000))
       await db.run('UPDATE Users SET otp_code = ? WHERE id = ?', generatedOtp, user.id)
-      return res.json({ message: 'OTP generated', otp: generatedOtp })
+
+      try {
+        await sendOtpEmail(String(email).toLowerCase().trim(), generatedOtp)
+      } catch (error) {
+        return res.status(500).json({ message: 'Failed to send OTP email. Please contact support.' })
+      }
+
+      return res.json({ message: 'OTP sent to your email' })
     }
 
     if (String(newPassword).length < 6) {
