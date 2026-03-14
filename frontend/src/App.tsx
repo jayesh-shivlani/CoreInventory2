@@ -2003,7 +2003,10 @@ function MoveHistoryPage({
             <p>Chronological stock ledger for every validated movement.</p>
           </div>
         </div>
-        <div className="product-stats-grid operations-stats-grid">
+        <div
+          className="product-stats-grid warehouses-stats-grid"
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px' }}
+        >
           <article className="product-stat-card">
             <div className="product-stat-label">Ledger Entries</div>
             <div className="product-stat-value">{movementCount}</div>
@@ -2121,8 +2124,9 @@ function WarehousesPage({
     }
   }
 
-  const internalCount = warehouses.filter((wh) => wh.type === 'Internal').length
-  const externalCount = warehouses.length - internalCount
+  const internalCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'internal').length
+  const vendorCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'vendor').length
+  const customerCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'customer').length
 
   return (
     <section className="warehouses-page">
@@ -2133,7 +2137,7 @@ function WarehousesPage({
             <p>Maintain storage points used across receipts, deliveries, and transfers.</p>
           </div>
         </div>
-        <div className="product-stats-grid operations-stats-grid">
+        <div className="product-stats-grid warehouses-stats-grid">
           <article className="product-stat-card">
             <div className="product-stat-label">Total Locations</div>
             <div className="product-stat-value">{warehouses.length}</div>
@@ -2143,8 +2147,12 @@ function WarehousesPage({
             <div className="product-stat-value">{internalCount}</div>
           </article>
           <article className="product-stat-card">
-            <div className="product-stat-label">External</div>
-            <div className="product-stat-value">{externalCount}</div>
+            <div className="product-stat-label">Vendor</div>
+            <div className="product-stat-value">{vendorCount}</div>
+          </article>
+          <article className="product-stat-card">
+            <div className="product-stat-label">Customer</div>
+            <div className="product-stat-value">{customerCount}</div>
           </article>
         </div>
       </div>

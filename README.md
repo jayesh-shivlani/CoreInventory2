@@ -21,6 +21,7 @@ video url : https://drive.google.com/file/d/1rprBFxXs6ZmwSgB-RUAOZ2p4K6txWbzU/vi
 
 - Authentication
 	- Register, login, profile fetch
+	- Signup verification via OTP
 	- OTP-assisted password reset
 - Inventory visibility
 	- KPI dashboard with filters
@@ -34,6 +35,8 @@ video url : https://drive.google.com/file/d/1rprBFxXs6ZmwSgB-RUAOZ2p4K6txWbzU/vi
 	- Immutable stock ledger (move history)
 - Master data
 	- Warehouse/location management
+- Access control
+	- Role-aware authorization for sensitive write operations
 
 ## Repository Structure
 

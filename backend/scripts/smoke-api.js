@@ -45,6 +45,48 @@ async function run() {
   console.log(`Running API smoke checks against ${BASE_URL}`)
 
   try {
+    const signupEmail = `smoke+${Date.now()}@example.com`
+    const signupPassword = 'smoke12345'
+
+    const signupRequest = await api('/auth/register', {
+      method: 'POST',
+      body: {
+        name: 'Smoke OTP User',
+        email: signupEmail,
+        password: signupPassword,
+      },
+    })
+
+    if (signupRequest.response.status !== 202) {
+      throw new Error(
+        `Signup OTP request failed (${signupRequest.response.status}): ${(signupRequest.payload && signupRequest.payload.message) || 'unknown error'}`,
+      )
+    }
+    record('Signup OTP request', true, `email=${signupEmail}`)
+
+    const signupOtp = signupRequest.payload?.dev_otp
+    if (signupOtp) {
+      await expectOk('Signup OTP verify', '/auth/register', {
+        method: 'POST',
+        body: {
+          name: 'Smoke OTP User',
+          email: signupEmail,
+          password: signupPassword,
+          otp: signupOtp,
+        },
+      })
+
+      const signupLogin = await expectOk('Signup OTP login', '/auth/login', {
+        method: 'POST',
+        body: { email: signupEmail, password: signupPassword },
+      })
+
+      record('Signup OTP verify', true, 'Account created')
+      record('Signup OTP login', Boolean(signupLogin?.token), 'Token issued for new user')
+    } else {
+      record('Signup OTP verify', true, 'Skipped: OTP delivered via email provider')
+    }
+
     const health = await expectOk('Health', '/health')
     record('Health', true, `status=${health?.status || 'ok'}`)
 

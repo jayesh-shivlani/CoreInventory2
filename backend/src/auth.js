@@ -40,7 +40,24 @@ async function requireAuth(req, res, next) {
   }
 }
 
+function requireRole(allowedRoles = []) {
+  const normalized = new Set(
+    (Array.isArray(allowedRoles) ? allowedRoles : [])
+      .map((role) => String(role || '').trim().toLowerCase())
+      .filter(Boolean),
+  )
+
+  return (req, res, next) => {
+    const currentRole = String(req.user?.role || '').trim().toLowerCase()
+    if (!currentRole || !normalized.has(currentRole)) {
+      return res.status(403).json({ message: 'Forbidden: insufficient role permissions' })
+    }
+    return next()
+  }
+}
+
 module.exports = {
   requireAuth,
+  requireRole,
   signToken,
 }

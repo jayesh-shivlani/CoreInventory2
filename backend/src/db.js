@@ -89,7 +89,8 @@ async function initDb() {
       email TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'Warehouse Staff',
-      otp_code TEXT
+      otp_code TEXT,
+      reset_otp_expires_at TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS Signup_Verifications (
@@ -237,6 +238,7 @@ async function initDb() {
     await db.exec('ALTER TABLE Stock_Ledger ALTER COLUMN product_id DROP NOT NULL')
     await db.exec('ALTER TABLE Operation_Lines ADD COLUMN IF NOT EXISTS picked_quantity NUMERIC NOT NULL DEFAULT 0')
     await db.exec('ALTER TABLE Operation_Lines ADD COLUMN IF NOT EXISTS packed_quantity NUMERIC NOT NULL DEFAULT 0')
+    await db.exec('ALTER TABLE Users ADD COLUMN IF NOT EXISTS reset_otp_expires_at TIMESTAMP')
   } catch (err) {
     console.log('Migration note: Stock_Ledger columns check done.')
   }

@@ -1328,6 +1328,12 @@ a { text-decoration: none; color: inherit; }
   grid-template-columns: repeat(3, minmax(140px, 1fr));
 }
 
+.warehouses-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px;
+}
+
 .operation-form-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -1383,6 +1389,7 @@ a { text-decoration: none; color: inherit; }
   .dashboard-meta-grid { grid-template-columns: 1fr 1fr; }
   .product-stats-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .operations-stats-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+  .warehouses-stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
   .product-filter-grid { grid-template-columns: 1fr 1fr; }
   .product-filter-actions { grid-column: 1 / -1; justify-content: space-between; }
   .product-form-grid { grid-template-columns: 1fr; }
@@ -1396,6 +1403,7 @@ a { text-decoration: none; color: inherit; }
   .dashboard-meta-grid { grid-template-columns: 1fr; }
   .product-stats-grid { grid-template-columns: 1fr; }
   .operations-stats-grid { grid-template-columns: 1fr; }
+  .warehouses-stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
   .product-filter-grid { grid-template-columns: 1fr; }
   .product-filter-actions { flex-direction: column; align-items: stretch; }
   .auth-reset-actions { flex-direction: column; }

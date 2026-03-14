@@ -8,16 +8,18 @@ const nodemailer = require('nodemailer')
 const fs = require('fs')
 const path = require('path')
 const { buildReference, ensureLocationByName, getDb, initDb } = require('./db')
-const { requireAuth, signToken } = require('./auth')
+const { requireAuth, requireRole, signToken } = require('./auth')
 
 const app = express()
 const PORT = Number(process.env.PORT || 4000)
 
 const OTP_TTL_MINUTES = Number(process.env.SIGNUP_OTP_TTL_MINUTES || 10)
+const RESET_OTP_TTL_MINUTES = Number(process.env.RESET_OTP_TTL_MINUTES || 10)
 const STRICT_EMAIL_DOMAIN_CHECK = String(process.env.STRICT_EMAIL_DOMAIN_CHECK || 'false').toLowerCase() === 'true'
 const EXPOSE_DEV_OTP =
   process.env.NODE_ENV !== 'production' &&
   String(process.env.EXPOSE_DEV_OTP || 'true').toLowerCase() === 'true'
+const MANAGER_ROLES = ['Manager', 'Admin']
 
 function isValidEmailFormat(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
@@ -289,14 +291,18 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 
     const db = await getDb()
-    const user = await db.get('SELECT id, otp_code FROM Users WHERE email = ?', String(email).toLowerCase().trim())
+    const user = await db.get(
+      'SELECT id, otp_code, reset_otp_expires_at FROM Users WHERE email = ?',
+      String(email).toLowerCase().trim(),
+    )
     if (!user) {
       return res.status(404).json({ message: 'User not found' })
     }
 
     if (!otp || !newPassword) {
       const generatedOtp = String(Math.floor(100000 + Math.random() * 900000))
-      await db.run('UPDATE Users SET otp_code = ? WHERE id = ?', generatedOtp, user.id)
+      const resetOtpExpiresAt = new Date(Date.now() + RESET_OTP_TTL_MINUTES * 60 * 1000).toISOString()
+      await db.run('UPDATE Users SET otp_code = ?, reset_otp_expires_at = ? WHERE id = ?', generatedOtp, resetOtpExpiresAt, user.id)
 
       try {
         const delivery = await sendOtpEmail(String(email).toLowerCase().trim(), generatedOtp, 'password reset')
@@ -318,8 +324,17 @@ app.post('/api/auth/reset-password', async (req, res) => {
       return res.status(400).json({ message: 'Invalid OTP code' })
     }
 
+    const notExpired = await db.get(
+      'SELECT id FROM Users WHERE id = ? AND reset_otp_expires_at > CURRENT_TIMESTAMP',
+      user.id,
+    )
+    if (!notExpired) {
+      await db.run('UPDATE Users SET otp_code = NULL, reset_otp_expires_at = NULL WHERE id = ?', user.id)
+      return res.status(400).json({ message: 'OTP expired. Please request a new one.' })
+    }
+
     const hash = await bcrypt.hash(String(newPassword), 10)
-    await db.run('UPDATE Users SET password_hash = ?, otp_code = NULL WHERE id = ?', hash, user.id)
+    await db.run('UPDATE Users SET password_hash = ?, otp_code = NULL, reset_otp_expires_at = NULL WHERE id = ?', hash, user.id)
 
     return res.json({ message: 'Password reset successful' })
   } catch (error) {
@@ -337,7 +352,7 @@ app.get('/api/locations', requireAuth, async (req, res) => {
   res.json(rows)
 })
 
-app.post('/api/locations', requireAuth, async (req, res) => {
+app.post('/api/locations', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   try {
     const { name, type } = req.body || {}
     if (!name || !type) {
@@ -429,7 +444,7 @@ app.get('/api/products/filter-options', requireAuth, async (req, res) => {
   })
 })
 
-app.post('/api/products', requireAuth, async (req, res) => {
+app.post('/api/products', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   try {
     const { name, sku, category, unit_of_measure, initial_stock, reorder_minimum } = req.body || {}
 
@@ -530,7 +545,7 @@ app.get('/api/products/:id', requireAuth, async (req, res) => {
   return res.json(row)
 })
 
-app.put('/api/products/:id', requireAuth, async (req, res) => {
+app.put('/api/products/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   try {
     const db = await getDb()
     const productId = Number(req.params.id)
@@ -578,7 +593,7 @@ app.put('/api/products/:id', requireAuth, async (req, res) => {
   }
 })
 
-app.delete('/api/products/:id', requireAuth, async (req, res) => {
+app.delete('/api/products/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   try {
     const db = await getDb()
     const productId = Number(req.params.id)
@@ -1108,7 +1123,7 @@ app.post('/api/operations/:id/validate', requireAuth, async (req, res) => {
   }
 })
 
-app.delete('/api/operations/:id', requireAuth, async (req, res) => {
+app.delete('/api/operations/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   const operationId = Number(req.params.id)
   if (!Number.isFinite(operationId)) {
     return res.status(400).json({ message: 'Invalid operation id' })
@@ -1186,7 +1201,7 @@ app.post('/api/operations/:id/status', requireAuth, async (req, res) => {
   }
 })
 
-app.delete('/api/locations/:id', requireAuth, async (req, res) => {
+app.delete('/api/locations/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   const locationId = Number(req.params.id)
   if (!Number.isFinite(locationId)) {
     return res.status(400).json({ message: 'Invalid location id' })

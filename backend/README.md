@@ -52,6 +52,8 @@ Important optional:
 - `RESEND_API_KEY` : enable OTP email delivery
 - `FROM_EMAIL` : sender identity for OTP emails
 - `FRONTEND_DIST_PATH` : static frontend path for production serving
+- `SIGNUP_OTP_TTL_MINUTES` : signup OTP validity window (default `10`)
+- `RESET_OTP_TTL_MINUTES` : reset OTP validity window (default `10`)
 
 ## Run Locally
 
@@ -101,6 +103,17 @@ Locations:
 
 - `GET /api/locations`
 - `POST /api/locations`
+
+## Authorization Notes
+
+- All operational and read APIs require a valid JWT.
+- Manager/Admin role is required for sensitive write routes:
+	- `POST /api/products`
+	- `PUT /api/products/:id`
+	- `DELETE /api/products/:id`
+	- `POST /api/locations`
+	- `DELETE /api/locations/:id`
+	- `DELETE /api/operations/:id`
 
 ## Demo Credentials
 
