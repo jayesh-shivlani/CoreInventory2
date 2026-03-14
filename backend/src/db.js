@@ -169,6 +169,47 @@ async function initDb() {
     );
   `)
 
+  // Supabase security hardening: enable RLS on tables exposed via public schema.
+  // Policies are created idempotently to allow authenticated access while blocking anon.
+  await db.exec(`
+    ALTER TABLE IF EXISTS public.products ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.stock_quants ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.locations ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.operations ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.operation_lines ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.stock_ledger ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.signup_verifications ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.audit_history ENABLE ROW LEVEL SECURITY;
+
+    DO $$
+    DECLARE
+      t text;
+      table_names text[] := ARRAY[
+        'products',
+        'stock_quants',
+        'locations',
+        'operations',
+        'users',
+        'operation_lines',
+        'stock_ledger',
+        'signup_verifications',
+        'audit_history'
+      ];
+    BEGIN
+      FOREACH t IN ARRAY table_names LOOP
+        IF to_regclass('public.' || t) IS NOT NULL THEN
+          EXECUTE format(
+            'CREATE POLICY IF NOT EXISTS %I ON public.%I FOR ALL TO authenticated USING (true) WITH CHECK (true)',
+            t || '_authenticated_all',
+            t
+          );
+        END IF;
+      END LOOP;
+    END
+    $$;
+  `)
+
   // Migration: Ensure columns exist
   try {
     await db.exec('ALTER TABLE Stock_Ledger ADD COLUMN IF NOT EXISTS note TEXT')
