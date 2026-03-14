@@ -480,6 +480,51 @@ app.put('/api/products/:id', requireAuth, async (req, res) => {
   }
 })
 
+app.delete('/api/products/:id', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb()
+    const productId = Number(req.params.id)
+    if (!Number.isFinite(productId)) {
+      return res.status(400).json({ message: 'Invalid product id' })
+    }
+
+    const product = await db.get('SELECT id, name FROM Products WHERE id = ?', productId)
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' })
+    }
+
+    const operationLineRef = await db.get(
+      'SELECT COUNT(*)::INT AS count FROM Operation_Lines WHERE product_id = ?',
+      productId,
+    )
+    if (Number(operationLineRef?.count || 0) > 0) {
+      return res.status(400).json({ message: 'Cannot delete product that is used in operations' })
+    }
+
+    const ledgerRef = await db.get(
+      'SELECT COUNT(*)::INT AS count FROM Stock_Ledger WHERE product_id = ?',
+      productId,
+    )
+    if (Number(ledgerRef?.count || 0) > 0) {
+      return res.status(400).json({ message: 'Cannot delete product that has stock movement history' })
+    }
+
+    await db.exec('BEGIN')
+    try {
+      await db.run('DELETE FROM Stock_Quants WHERE product_id = ?', productId)
+      await db.run('DELETE FROM Products WHERE id = ?', productId)
+      await db.exec('COMMIT')
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
+
+    return res.json({ message: 'Product deleted', id: productId })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to delete product' })
+  }
+})
+
 app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
   try {
     const db = await getDb()
@@ -918,6 +963,81 @@ app.post('/api/operations/:id/validate', requireAuth, async (req, res) => {
   }
 })
 
+app.delete('/api/operations/:id', requireAuth, async (req, res) => {
+  const operationId = Number(req.params.id)
+  if (!Number.isFinite(operationId)) {
+    return res.status(400).json({ message: 'Invalid operation id' })
+  }
+
+  const db = await getDb()
+  try {
+    const operation = await db.get('SELECT * FROM Operations WHERE id = ?', operationId)
+    if (!operation) {
+      return res.status(404).json({ message: 'Operation not found' })
+    }
+
+    if (operation.status === 'Done') {
+      return res.status(400).json({ message: 'Cannot delete a validated operation' })
+    }
+
+    await db.exec('BEGIN')
+    try {
+      await db.run('DELETE FROM Operation_Lines WHERE operation_id = ?', operationId)
+      await db.run('DELETE FROM Operations WHERE id = ?', operationId)
+
+      await db.exec('COMMIT')
+      return res.json({ message: 'Operation deleted' })
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to delete operation' })
+  }
+})
+
+app.delete('/api/locations/:id', requireAuth, async (req, res) => {
+  const locationId = Number(req.params.id)
+  if (!Number.isFinite(locationId)) {
+    return res.status(400).json({ message: 'Invalid location id' })
+  }
+
+  const db = await getDb()
+  try {
+    const location = await db.get('SELECT * FROM Locations WHERE id = ?', locationId)
+    if (!location) {
+      return res.status(404).json({ message: 'Location not found' })
+    }
+
+    const stock = await db.get('SELECT SUM(quantity) as total FROM Stock_Quants WHERE location_id = ?', locationId)
+    if (stock && Number(stock.total) > 0) {
+      return res.status(400).json({ message: 'Cannot delete location with existing stock' })
+    }
+
+    await db.exec('BEGIN TRANSACTION')
+    try {
+      await db.run('DELETE FROM Stock_Quants WHERE location_id = ?', locationId)
+      await db.run('DELETE FROM Locations WHERE id = ?', locationId)
+
+      await db.run(
+        `
+          INSERT INTO Stock_Ledger (note, timestamp)
+          VALUES (?, datetime("now"))
+        `,
+        `Deleted Location: ${location.name}`
+      )
+
+      await db.exec('COMMIT')
+      res.json({ message: 'Location deleted' })
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to delete location' })
+  }
+})
+
 app.get('/api/ledger', requireAuth, async (req, res) => {
   const db = await getDb()
   const rows = await db.all(
@@ -929,9 +1049,10 @@ app.get('/api/ledger', requireAuth, async (req, res) => {
         src.name AS from_location_name,
         dst.name AS to_location_name,
         sl.quantity,
-        o.reference_number
+        o.reference_number,
+        sl.note
       FROM Stock_Ledger sl
-      JOIN Products p ON p.id = sl.product_id
+      LEFT JOIN Products p ON p.id = sl.product_id
       LEFT JOIN Locations src ON src.id = sl.from_location_id
       LEFT JOIN Locations dst ON dst.id = sl.to_location_id
       LEFT JOIN Operations o ON o.id = sl.operation_id

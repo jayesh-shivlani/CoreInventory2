@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   NavLink,
@@ -62,6 +62,7 @@ type LedgerEntry = {
   to_location_name?: string
   quantity: number
   reference_number?: string
+  note?: string
 }
 
 type Warehouse = {
@@ -114,7 +115,7 @@ const formatDate = (value: string): string => {
 
 async function apiRequest<T>(
   path: string,
-  method: 'GET' | 'POST' | 'PUT' = 'GET',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
   token?: string,
   payload?: unknown,
 ): Promise<T> {
@@ -478,89 +479,100 @@ function AuthPage({
 
   return (
     <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-logo">
-          <img className="auth-logo-image" src="/odoo.png" alt="Odoo logo" />
-          <div className="auth-logo-text">
-            <h2>Core Inventory</h2>
-            <p>Inventory Management System</p>
-          </div>
-        </div>
-
-        <div className="auth-tabs">
-          <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null) }}>Sign In</button>
-          <button type="button" className={`auth-tab${mode === 'signup' ? ' active' : ''}`} onClick={() => { setMode('signup'); setAuthError(null) }}>Create Account</button>
-        </div>
-
-        <form onSubmit={submit}>
-          {mode === 'signup' && (
-            <div className="form-field">
-              <label className="form-field-label">Full Name</label>
-              <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" required />
+      <div className="auth-layout">
+        <aside className="auth-hero-panel">
+          <div className="auth-logo">
+            <img className="auth-logo-image" src="/odoo.png" alt="Odoo logo" />
+            <div className="auth-logo-text">
+              <h2>Core Inventory</h2>
+              <p>Inventory Management System</p>
             </div>
-          )}
-          <div className="form-field">
-            <label className="form-field-label">Email Address</label>
-            <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
           </div>
-          <div className="form-field">
-            <label className="form-field-label">Password</label>
-            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
+          <h3 className="auth-hero-title">Run warehouse operations without spreadsheet chaos.</h3>
+          <p className="auth-hero-copy">Track stock, manage transfers, validate deliveries, and monitor inventory in one consistent workspace.</p>
+          <div className="auth-hero-points">
+            <span>Live stock visibility</span>
+            <span>Operational traceability</span>
+            <span>Centralized product control</span>
+          </div>
+        </aside>
+
+        <div className="auth-card">
+          <div className="auth-tabs">
+            <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null) }}>Sign In</button>
+            <button type="button" className={`auth-tab${mode === 'signup' ? ' active' : ''}`} onClick={() => { setMode('signup'); setAuthError(null) }}>Create Account</button>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '9px 16px', marginTop: '8px' }} disabled={busy}>
-            {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
-          </button>
-          {authError && (
-            <div className="auth-error">{authError}</div>
-          )}
-
-          {mode === 'login' && (
-            <button type="button" className="link-btn" style={{ marginTop: '14px', display: 'block' }} onClick={() => {
-              setShowReset((prev) => !prev)
-              setResetStep('request')
-              setResetOtp('')
-              setResetNewPassword('')
-              setResetEmail(email)
-              setOtpSentTo('')
-              setResendCooldown(0)
-            }}>{showReset ? 'Cancel password reset' : 'Forgot password?'}</button>
-          )}
-
-          {mode === 'login' && showReset && (
-            <div className="reset-box">
+          <form onSubmit={submit}>
+            {mode === 'signup' && (
               <div className="form-field">
-                <label className="form-field-label">Email for reset</label>
-                <input className="form-input" type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} required />
+                <label className="form-field-label">Full Name</label>
+                <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" required />
               </div>
-              {resetStep === 'verify' && otpSentTo && (
-                <p className="muted" style={{ fontSize: '12px', marginBottom: '10px' }}>OTP sent to {otpSentTo}</p>
-              )}
-              {resetStep === 'verify' && (
-                <>
-                  <div className="form-field">
-                    <label className="form-field-label">OTP Code</label>
-                    <input className="form-input" value={resetOtp} onChange={(e) => setResetOtp(e.target.value)} required />
-                  </div>
-                  <div className="form-field">
-                    <label className="form-field-label">New Password</label>
-                    <input className="form-input" type="password" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} minLength={6} required />
-                  </div>
-                </>
-              )}
-              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                <button type="button" className="btn btn-secondary" onClick={requestResetOtp} disabled={resetBusy || resendCooldown > 0}>
-                  {resetBusy ? 'Sending…' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resetStep === 'request' ? 'Send OTP' : 'Resend OTP'}
-                </button>
-                {resetStep === 'verify' && (
-                  <button type="button" className="btn btn-primary" onClick={submitPasswordReset} disabled={resetBusy}>
-                    {resetBusy ? 'Resetting…' : 'Reset Password'}
-                  </button>
-                )}
-              </div>
+            )}
+            <div className="form-field">
+              <label className="form-field-label">Email Address</label>
+              <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
             </div>
-          )}
-        </form>
+            <div className="form-field">
+              <label className="form-field-label">Password</label>
+              <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
+            </div>
+
+            <button type="submit" className="btn btn-primary auth-submit-btn" disabled={busy}>
+              {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            </button>
+            {authError && (
+              <div className="auth-error">{authError}</div>
+            )}
+
+            {mode === 'login' && (
+              <button type="button" className="link-btn auth-reset-toggle" onClick={() => {
+                setShowReset((prev) => !prev)
+                setResetStep('request')
+                setResetOtp('')
+                setResetNewPassword('')
+                setResetEmail(email)
+                setOtpSentTo('')
+                setResendCooldown(0)
+              }}>{showReset ? 'Cancel password reset' : 'Forgot password?'}</button>
+            )}
+
+            {mode === 'login' && showReset && (
+              <div className="reset-box">
+                <div className="form-field">
+                  <label className="form-field-label">Email for reset</label>
+                  <input className="form-input" type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} required />
+                </div>
+                {resetStep === 'verify' && otpSentTo && (
+                  <p className="muted auth-reset-note">OTP sent to {otpSentTo}</p>
+                )}
+                {resetStep === 'verify' && (
+                  <>
+                    <div className="form-field">
+                      <label className="form-field-label">OTP Code</label>
+                      <input className="form-input" value={resetOtp} onChange={(e) => setResetOtp(e.target.value)} required />
+                    </div>
+                    <div className="form-field">
+                      <label className="form-field-label">New Password</label>
+                      <input className="form-input" type="password" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} minLength={6} required />
+                    </div>
+                  </>
+                )}
+                <div className="auth-reset-actions">
+                  <button type="button" className="btn btn-secondary" onClick={requestResetOtp} disabled={resetBusy || resendCooldown > 0}>
+                    {resetBusy ? 'Sending…' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resetStep === 'request' ? 'Send OTP' : 'Resend OTP'}
+                  </button>
+                  {resetStep === 'verify' && (
+                    <button type="button" className="btn btn-primary" onClick={submitPasswordReset} disabled={resetBusy}>
+                      {resetBusy ? 'Resetting…' : 'Reset Password'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </form>
+        </div>
       </div>
     </div>
   )
@@ -656,16 +668,58 @@ function DashboardPage({
     }
   }, [query, token, pushToast])
 
+  const activeDashboardFilters = [docType, status, warehouse, category].filter(Boolean).length
+
   return (
-    <section>
-      <div className="dashboard-header-card">
+    <section className="dashboard-page">
+      <div className="dashboard-hero-card">
         <div className="dashboard-title">Inventory Dashboard</div>
+        <p className="dashboard-subtitle">Realtime status of inventory, operations, and transfer workload.</p>
+        <div className="dashboard-meta-grid">
+          <div className="dashboard-meta-item">
+            <span>Filters Applied</span>
+            <strong>{activeDashboardFilters}</strong>
+          </div>
+          <div className="dashboard-meta-item">
+            <span>Pending Work</span>
+            <strong>{kpis.pendingReceipts + kpis.pendingDeliveries + kpis.scheduledInternalTransfers}</strong>
+          </div>
+          <div className="dashboard-meta-item">
+            <span>Stock Risk</span>
+            <strong>{kpis.lowOrOutOfStockItems}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className="dashboard-header-card">
+        <div className="list-header dashboard-section-header">
+          <h2>Operational Metrics</h2>
+        </div>
         <div className="kpi-grid">
           <KpiCard label="Total Products in Stock" value={kpis.totalProductsInStock} />
           <KpiCard label="Low / Out of Stock" value={kpis.lowOrOutOfStockItems} variant="warning" />
           <KpiCard label="Pending Receipts" value={kpis.pendingReceipts} />
           <KpiCard label="Pending Deliveries" value={kpis.pendingDeliveries} />
           <KpiCard label="Transfers Scheduled" value={kpis.scheduledInternalTransfers} variant="success" />
+        </div>
+      </div>
+
+      <div className="dashboard-header-card">
+        <div className="list-header dashboard-section-header">
+          <h2>Dashboard Filters</h2>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              setDocType('')
+              setStatus('')
+              setWarehouse('')
+              setCategory('')
+            }}
+            disabled={activeDashboardFilters === 0}
+          >
+            Reset
+          </button>
         </div>
         <div className="filters-row">
           <div className="filter-group">
@@ -766,7 +820,7 @@ function ProductsPage({
     setViewMode('form')
   }
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -782,9 +836,9 @@ function ProductsPage({
     } finally {
       setLoading(false)
     }
-  }
+  }, [filterCategory, filterLocation, lowStockOnly, pushToast, search, token])
 
-  const loadFilterOptions = async () => {
+  const loadFilterOptions = useCallback(async () => {
     try {
       const data = await apiRequest<ProductFilterOptions>('/products/filter-options', 'GET', token ?? undefined)
       setFilterOptions({
@@ -795,12 +849,11 @@ function ProductsPage({
     } catch {
       // Keep the page usable even if filter options cannot be loaded.
     }
-  }
+  }, [token])
 
   useEffect(() => {
     loadFilterOptions()
-    load()
-  }, [token])
+  }, [loadFilterOptions])
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -809,11 +862,11 @@ function ProductsPage({
     }, LIVE_SYNC_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [search, filterCategory, filterLocation, lowStockOnly, token])
+  }, [load, loadFilterOptions])
 
   useEffect(() => {
     load()
-  }, [filterCategory, filterLocation, lowStockOnly])
+  }, [load])
 
   const categoryOptions = useMemo(
     () => Array.from(new Set([...DEFAULT_CATEGORIES, ...filterOptions.categories, category].filter(Boolean))),
@@ -877,34 +930,132 @@ function ProductsPage({
     }
   }
 
+  const deleteProduct = async () => {
+    if (!editingProductId) return
+    if (!window.confirm('Are you sure you want to delete this product?')) return
+
+    setSaving(true)
+    try {
+      await apiRequest(`/products/${editingProductId}`, 'DELETE', token ?? undefined)
+      pushToast('success', 'Product deleted')
+      resetForm()
+      await loadFilterOptions()
+      load()
+      setViewMode('list')
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const clearFilters = () => {
+    setSearch('')
+    setFilterCategory('')
+    setFilterLocation('')
+    setLowStockOnly(false)
+  }
+
+  const totalProducts = products.length
+  const totalStock = useMemo(
+    () => products.reduce((sum, product) => sum + safeNumber(product.availableStock), 0),
+    [products],
+  )
+  const lowStockCount = useMemo(
+    () => products.filter((product) => safeNumber(product.availableStock) <= safeNumber(product.reorder_minimum)).length,
+    [products],
+  )
+  const activeFiltersCount = [search.trim(), filterCategory.trim(), filterLocation.trim(), lowStockOnly ? '1' : '']
+    .filter(Boolean)
+    .length
+
   return (
-    <section>
+    <section className="product-page">
       {viewMode === 'list' && (
-        <div className="list-card">
-          <div className="list-header">
-            <h2>Products</h2>
-            <button type="button" className="btn btn-primary" onClick={startNew}>+ New</button>
+        <>
+          <div className="product-overview">
+            <div className="product-overview-top">
+              <div className="product-title-block">
+                <h2>Products</h2>
+                <p>Manage catalog items, monitor stock, and keep reorder levels in control.</p>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={startNew}>+ New Product</button>
+            </div>
+            <div className="product-stats-grid">
+              <article className="product-stat-card">
+                <div className="product-stat-label">Total Products</div>
+                <div className="product-stat-value">{totalProducts}</div>
+              </article>
+              <article className="product-stat-card">
+                <div className="product-stat-label">Total Units on Hand</div>
+                <div className="product-stat-value">{totalStock}</div>
+              </article>
+              <article className="product-stat-card">
+                <div className="product-stat-label">Low or Out of Stock</div>
+                <div className="product-stat-value product-stat-warning">{lowStockCount}</div>
+              </article>
+              <article className="product-stat-card">
+                <div className="product-stat-label">Active Filters</div>
+                <div className="product-stat-value">{activeFiltersCount}</div>
+              </article>
+            </div>
           </div>
-          <div className="list-toolbar">
-            <input className="search-input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or SKU…" />
-            <select className="form-select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
-              <option value="">All categories</option>
-              {filterOptions.categories.map((value) => (
-                <option key={value} value={value}>{value}</option>
-              ))}
-            </select>
-            <select className="form-select" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
-              <option value="">All locations</option>
-              {filterOptions.locations.map((value) => (
-                <option key={value} value={value}>{value}</option>
-              ))}
-            </select>
-            <label className="checkbox-label">
-              <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
-              Low stock only
-            </label>
-            <button type="button" className="btn btn-secondary" onClick={load}>Search</button>
+
+          <div className="list-card product-filter-card">
+            <div className="list-header">
+              <h2>Filter Products</h2>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={clearFilters}
+                disabled={activeFiltersCount === 0}
+              >
+                Reset
+              </button>
+            </div>
+            <div className="product-filter-grid">
+              <div className="filter-group">
+                <label className="filter-label">Search</label>
+                <input
+                  className="search-input"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Name, SKU, or category"
+                />
+              </div>
+              <div className="filter-group">
+                <label className="filter-label">Category</label>
+                <select className="form-select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                  <option value="">All categories</option>
+                  {filterOptions.categories.map((value) => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-group">
+                <label className="filter-label">Location</label>
+                <select className="form-select" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
+                  <option value="">All locations</option>
+                  {filterOptions.locations.map((value) => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="product-filter-actions">
+                <label className="checkbox-label">
+                  <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
+                  Low stock only
+                </label>
+                <button type="button" className="btn btn-primary" onClick={load}>Apply Filters</button>
+              </div>
+            </div>
           </div>
+
+          <div className="list-card product-table-card">
+            <div className="list-header">
+              <h2>Product List</h2>
+              <p className="muted">Click Edit to open a product.</p>
+            </div>
           <div className="data-table-wrap">
             <table className="data-table">
               <thead>
@@ -915,25 +1066,43 @@ function ProductsPage({
                   <th>Unit of Measure</th>
                   <th>On Hand</th>
                   <th>Location</th>
+                  <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr className="empty-row"><td colSpan={6}>Loading products…</td></tr>}
-                {!loading && products.length === 0 && <tr className="empty-row"><td colSpan={6}>No products found. Click "+ New" to create one.</td></tr>}
+                {loading && <tr className="empty-row"><td colSpan={8}>Loading products…</td></tr>}
+                {!loading && products.length === 0 && <tr className="empty-row"><td colSpan={8}>No products found. Click "+ New Product" to create one.</td></tr>}
                 {!loading && products.map((product) => (
-                  <tr key={product.id} className="clickable" onClick={() => startEdit(product)}>
-                    <td><strong>{product.name}</strong></td>
+                  <tr key={product.id}>
+                    <td>
+                      <div className="product-name-cell">
+                        <strong>{product.name}</strong>
+                        <span className="muted">Min reorder: {safeNumber(product.reorder_minimum)}</span>
+                      </div>
+                    </td>
                     <td>{product.sku}</td>
                     <td>{product.category}</td>
                     <td>{product.unit_of_measure}</td>
                     <td>{safeNumber(product.availableStock)}</td>
                     <td>{product.locationName ?? '—'}</td>
+                    <td>
+                      <span className={`badge ${safeNumber(product.availableStock) <= safeNumber(product.reorder_minimum) ? 'badge-waiting' : 'badge-done'}`}>
+                        {safeNumber(product.availableStock) <= safeNumber(product.reorder_minimum) ? 'Low Stock' : 'In Stock'}
+                      </span>
+                    </td>
+                    <td className="product-actions-cell">
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(product)}>
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
+        </>
       )}
 
       {viewMode === 'form' && (
@@ -943,50 +1112,82 @@ function ProductsPage({
               <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
               <button type="button" className="btn btn-secondary" onClick={() => { resetForm(); setViewMode('list') }}>Discard</button>
             </div>
+            {editingProductId && (
+              <div className="control-bar-right">
+                <button type="button" className="btn btn-danger-outline" onClick={deleteProduct} disabled={saving}>
+                  Delete
+                </button>
+              </div>
+            )}
           </div>
-          <div className="form-sheet">
-            <div className="form-title-area">
-              <div className="form-doc-subtitle">{editingProductId ? 'Edit Product' : 'New Product'}</div>
-              <input
-                className="form-doc-title"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                placeholder="e.g. Steel Rods"
-              />
-            </div>
-            <div className="field-row">
-              <div className="field-group">
-                <label className="field-label">Internal Reference (SKU)</label>
-                <input className="form-input" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="e.g. SKU-001" required />
+          <div className="product-form-grid">
+            <div className="form-sheet">
+              <div className="form-title-area">
+                <div className="form-doc-subtitle">{editingProductId ? 'Edit Product' : 'New Product'}</div>
+                <input
+                  className="form-doc-title"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  placeholder="e.g. Steel Rods"
+                />
               </div>
-              <div className="field-group">
-                <label className="field-label">Unit of Measure</label>
-                <select className="form-select" value={uom} onChange={(e) => setUom(e.target.value)} required>
-                  {uomOptions.map((value) => (
-                    <option key={value} value={value}>{value}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field-group">
-                <label className="field-label">Category</label>
-                <select className="form-select" value={category} onChange={(e) => setCategory(e.target.value)} required>
-                  <option value="">Select category…</option>
-                  {categoryOptions.map((value) => (
-                    <option key={value} value={value}>{value}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field-group">
-                <label className="field-label">Reorder Minimum</label>
-                <input className="form-input" type="number" min={0} value={reorderMinimum} onChange={(e) => setReorderMinimum(e.target.value)} />
-              </div>
-              {!editingProductId && (
+              <div className="field-row">
                 <div className="field-group">
-                  <label className="field-label">Initial Stock</label>
-                  <input className="form-input" type="number" min={0} value={initialStock} onChange={(e) => setInitialStock(e.target.value)} />
+                  <label className="field-label">Internal Reference (SKU)</label>
+                  <input className="form-input" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="e.g. SKU-001" required />
                 </div>
-              )}
+                <div className="field-group">
+                  <label className="field-label">Category</label>
+                  <select className="form-select" value={category} onChange={(e) => setCategory(e.target.value)} required>
+                    <option value="">Select category…</option>
+                    {categoryOptions.map((value) => (
+                      <option key={value} value={value}>{value}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label className="field-label">Unit of Measure</label>
+                  <select className="form-select" value={uom} onChange={(e) => setUom(e.target.value)} required>
+                    {uomOptions.map((value) => (
+                      <option key={value} value={value}>{value}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label className="field-label">Reorder Minimum</label>
+                  <input className="form-input" type="number" min={0} value={reorderMinimum} onChange={(e) => setReorderMinimum(e.target.value)} />
+                </div>
+                {!editingProductId && (
+                  <div className="field-group">
+                    <label className="field-label">Initial Stock</label>
+                    <input className="form-input" type="number" min={0} value={initialStock} onChange={(e) => setInitialStock(e.target.value)} />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="panel-card product-form-meta">
+              <div className="panel-card-header">Guidelines</div>
+              <div className="panel-card-body">
+                <div className="info-grid">
+                  <div className="info-item">
+                    <dt>SKU</dt>
+                    <dd>Use a unique and searchable code.</dd>
+                  </div>
+                  <div className="info-item">
+                    <dt>Reorder</dt>
+                    <dd>Triggers low stock visibility in lists.</dd>
+                  </div>
+                  <div className="info-item">
+                    <dt>Category</dt>
+                    <dd>Used in dashboard and filtering.</dd>
+                  </div>
+                  <div className="info-item">
+                    <dt>Initial Stock</dt>
+                    <dd>Available only for new products.</dd>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </form>
@@ -1024,7 +1225,7 @@ function OperationsPage({
     setDestinationLocation('')
   }
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
       const [docs, productList, locationList] = await Promise.all([
@@ -1040,11 +1241,11 @@ function OperationsPage({
     } finally {
       setLoading(false)
     }
-  }
+  }, [operationType, pushToast, token])
 
   useEffect(() => {
     fetchData()
-  }, [operationType, token])
+  }, [fetchData])
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1052,7 +1253,7 @@ function OperationsPage({
     }, LIVE_SYNC_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [operationType, token])
+  }, [fetchData])
 
   const requiresSource = operationType === 'Delivery' || operationType === 'Internal'
   const requiresDestination = operationType === 'Internal'
@@ -1164,19 +1365,74 @@ function OperationsPage({
     }
   }
 
+  const deleteOperation = async (id: number) => {
+    if (!window.confirm('Are you sure you want to delete this operation? This will be recorded in history.')) return
+    try {
+      await apiRequest(`/operations/${id}`, 'DELETE', token ?? undefined)
+      pushToast('success', 'Operation deleted')
+      await fetchData()
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    }
+  }
+
   const opLabel = operationType === 'Receipt' ? 'Receipts'
     : operationType === 'Delivery' ? 'Delivery Orders'
       : operationType === 'Internal' ? 'Internal Transfers'
         : 'Inventory Adjustments'
+  const singularOpLabel = operationType === 'Receipt'
+    ? 'Receipt'
+    : operationType === 'Delivery'
+      ? 'Delivery Order'
+      : operationType === 'Internal'
+        ? 'Internal Transfer'
+        : 'Inventory Adjustment'
+  const statBaseLabel = operationType === 'Receipt'
+    ? 'Receipts'
+    : operationType === 'Delivery'
+      ? 'Deliveries'
+      : operationType === 'Internal'
+        ? 'Transfers'
+        : 'Adjustments'
+
+  const draftCount = operations.filter((op) => op.status !== 'Done').length
+  const doneCount = operations.filter((op) => op.status === 'Done').length
 
   return (
     <section>
       {viewMode === 'list' && (
-        <div className="list-card">
-          <div className="list-header">
-            <h2>{opLabel}</h2>
-            <button type="button" className="btn btn-primary" onClick={() => { resetDraftForm(); setViewMode('form') }}>+ New</button>
+        <>
+          <div className="operations-overview">
+            <div className="operations-overview-top">
+              <div className="product-title-block">
+                <h2>{opLabel}</h2>
+                <p>Create, validate, and monitor stock movements with full traceability.</p>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={() => { resetDraftForm(); setViewMode('form') }}>
+                + New {singularOpLabel}
+              </button>
+            </div>
+            <div className="product-stats-grid operations-stats-grid">
+              <article className="product-stat-card">
+                <div className="product-stat-label">Total {statBaseLabel}</div>
+                <div className="product-stat-value">{operations.length}</div>
+              </article>
+              <article className="product-stat-card">
+                <div className="product-stat-label">Open {statBaseLabel}</div>
+                <div className="product-stat-value">{draftCount}</div>
+              </article>
+              <article className="product-stat-card">
+                <div className="product-stat-label">Validated {statBaseLabel}</div>
+                <div className="product-stat-value product-stat-warning">{doneCount}</div>
+              </article>
+            </div>
           </div>
+
+          <div className="list-card">
+            <div className="list-header">
+              <h2>{opLabel} List</h2>
+              <p className="muted">Validate or remove non-done {statBaseLabel.toLowerCase()}.</p>
+            </div>
           <div className="data-table-wrap">
             <table className="data-table">
               <thead>
@@ -1190,8 +1446,8 @@ function OperationsPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr className="empty-row"><td colSpan={6}>Loading documents…</td></tr>}
-                {!loading && operations.length === 0 && <tr className="empty-row"><td colSpan={6}>No documents yet. Click "+ New" to create one.</td></tr>}
+                {loading && <tr className="empty-row"><td colSpan={6}>Loading {statBaseLabel.toLowerCase()}…</td></tr>}
+                {!loading && operations.length === 0 && <tr className="empty-row"><td colSpan={6}>No {statBaseLabel.toLowerCase()} yet. Click "+ New {singularOpLabel}" to create one.</td></tr>}
                 {!loading && operations.map((op) => (
                   <tr key={op.id}>
                     <td><strong>{op.reference_number}</strong></td>
@@ -1202,18 +1458,26 @@ function OperationsPage({
                     <td>{op.destination_location_name ?? '—'}</td>
                     <td>{formatDate(op.created_at)}</td>
                     <td>
-                      {op.status !== 'Done' ? (
-                        <button type="button" className="btn btn-secondary" onClick={() => validateOperation(op.id)}>Validate</button>
-                      ) : (
-                        <span className="muted">Done</span>
-                      )}
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {op.status !== 'Done' ? (
+                          <button type="button" className="btn btn-secondary" onClick={() => validateOperation(op.id)}>Validate</button>
+                        ) : (
+                          <span className="muted">Done</span>
+                        )}
+                        {op.status !== 'Done' && (
+                          <button type="button" className="btn-icon" onClick={() => deleteOperation(op.id)} title="Delete document">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+          </div>
+        </>
       )}
 
       {viewMode === 'form' && (
@@ -1231,100 +1495,120 @@ function OperationsPage({
                 setViewMode('list')
               }}>Discard</button>
             </div>
-            <div className="control-bar-right">
-              <div className="status-pipeline">
-                <span className="status-step active">Draft</span>
-                <span className="status-step">Done</span>
-              </div>
-            </div>
           </div>
 
-          <div className="form-sheet">
-            <div className="form-title-area">
-              <div className="form-doc-subtitle">{opLabel}</div>
-              <h2 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text)', marginTop: '4px' }}>New {operationType === 'Internal' ? 'Internal Transfer' : operationType}</h2>
-            </div>
-
-            <div className="field-row">
-              {operationType === 'Receipt' && (
-                <div className="field-group">
-                  <label className="field-label">Receive From (Supplier)</label>
-                  <input className="form-input" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Supplier name or vendor" required />
-                </div>
-              )}
-              {requiresSource && (
-                <div className="field-group">
-                  <label className="field-label">Source Location</label>
-                  <select className="form-select" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)} required>
-                    <option value="">Select source location…</option>
-                    {locations.map((item) => (
-                      <option key={item.id} value={item.name}>{item.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {requiresDestination && (
-                <div className="field-group">
-                  <label className="field-label">Destination Location</label>
-                  <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
-                    <option value="">Select destination location…</option>
-                    {locations.map((item) => (
-                      <option key={item.id} value={item.name}>{item.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {requiresAdjustmentLocation && (
-                <div className="field-group">
-                  <label className="field-label">Inventory Location</label>
-                  <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
-                    <option value="">Select location…</option>
-                    {locations.map((item) => (
-                      <option key={item.id} value={item.name}>{item.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div className="notebook">
-              <div className="notebook-tabs">
-                <button type="button" className="notebook-tab active">Operations</button>
+          <div className="operation-form-grid">
+            <div className="form-sheet">
+              <div className="form-title-area">
+                <div className="form-doc-subtitle">{opLabel}</div>
+                <h2 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text)', marginTop: '4px' }}>New {singularOpLabel}</h2>
               </div>
-              <div className="notebook-content">
-                <table className="lines-table">
-                  <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th style={{ width: '160px' }}>{operationType === 'Adjustment' ? 'Counted Qty' : 'Demand'}</th>
-                      <th style={{ width: '40px' }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lines.map((line, index) => (
-                      <tr key={index}>
-                        <td>
-                          <select className="form-select" value={line.product_id} onChange={(e) => updateLine(index, { product_id: e.target.value })} required>
-                            <option value="">Select a product…</option>
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input className="form-input" type="number" min={0} value={line.requested_quantity} onChange={(e) => updateLine(index, { requested_quantity: e.target.value })} required />
-                        </td>
-                        <td>
-                          <button type="button" className="btn-icon" onClick={() => removeLine(index)} title="Remove">✕</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <button type="button" className="add-line-btn" onClick={addLine}>+ Add a line</button>
-                {overRequested && (
-                  <p className="warning-text" style={{ marginTop: '12px' }}>⚠️ One or more quantities exceed available stock.</p>
+
+              <div className="field-row">
+                {operationType === 'Receipt' && (
+                  <div className="field-group">
+                    <label className="field-label">Receive From (Supplier)</label>
+                    <input className="form-input" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Supplier name or vendor" required />
+                  </div>
                 )}
+                {requiresSource && (
+                  <div className="field-group">
+                    <label className="field-label">Source Location</label>
+                    <select className="form-select" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)} required>
+                      <option value="">Select source location…</option>
+                      {locations.map((item) => (
+                        <option key={item.id} value={item.name}>{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {requiresDestination && (
+                  <div className="field-group">
+                    <label className="field-label">Destination Location</label>
+                    <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
+                      <option value="">Select destination location…</option>
+                      {locations.map((item) => (
+                        <option key={item.id} value={item.name}>{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {requiresAdjustmentLocation && (
+                  <div className="field-group">
+                    <label className="field-label">Inventory Location</label>
+                    <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
+                      <option value="">Select location…</option>
+                      {locations.map((item) => (
+                        <option key={item.id} value={item.name}>{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="notebook">
+                <div className="notebook-tabs">
+                  <button type="button" className="notebook-tab active">Operations</button>
+                </div>
+                <div className="notebook-content">
+                  <table className="lines-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th style={{ width: '160px' }}>{operationType === 'Adjustment' ? 'Counted Qty' : 'Demand'}</th>
+                        <th style={{ width: '40px' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((line, index) => (
+                        <tr key={index}>
+                          <td>
+                            <select className="form-select" value={line.product_id} onChange={(e) => updateLine(index, { product_id: e.target.value })} required>
+                              <option value="">Select a product…</option>
+                              {products.map((p) => (
+                                <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input className="form-input" type="number" min={0} value={line.requested_quantity} onChange={(e) => updateLine(index, { requested_quantity: e.target.value })} required />
+                          </td>
+                          <td>
+                            <button type="button" className="btn-icon" onClick={() => removeLine(index)} title="Remove">✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button type="button" className="add-line-btn" onClick={addLine}>+ Add a line</button>
+                  {overRequested && (
+                    <p className="warning-text" style={{ marginTop: '12px' }}>One or more quantities exceed available stock.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="panel-card product-form-meta">
+              <div className="panel-card-header">Document Tips</div>
+              <div className="panel-card-body">
+                <div className="info-grid">
+                  <div className="info-item">
+                    <dt>Save Draft</dt>
+                    <dd>Use when details are still in progress.</dd>
+                  </div>
+                  <div className="info-item">
+                    <dt>Validate</dt>
+                    <dd>Commits stock movement immediately.</dd>
+                  </div>
+                  <div className="info-item">
+                    <dt>Quantity Rule</dt>
+                    <dd>Deliveries cannot exceed available stock.</dd>
+                  </div>
+                  <div className="info-item">
+                    <dt>Traceability</dt>
+                    <dd>Each document gets a reference number.</dd>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1365,11 +1649,37 @@ function MoveHistoryPage({
     return () => clearInterval(timer)
   }, [token, pushToast])
 
+  const movementCount = entries.length
+  const movedQuantity = useMemo(
+    () => entries.reduce((sum, entry) => sum + safeNumber(entry.quantity), 0),
+    [entries],
+  )
+
   return (
-    <section>
+    <section className="move-history-page">
+      <div className="operations-overview">
+        <div className="operations-overview-top">
+          <div className="product-title-block">
+            <h2>Move History</h2>
+            <p>Chronological stock ledger for every validated movement.</p>
+          </div>
+        </div>
+        <div className="product-stats-grid operations-stats-grid">
+          <article className="product-stat-card">
+            <div className="product-stat-label">Ledger Entries</div>
+            <div className="product-stat-value">{movementCount}</div>
+          </article>
+          <article className="product-stat-card">
+            <div className="product-stat-label">Moved Quantity</div>
+            <div className="product-stat-value">{movedQuantity}</div>
+          </article>
+        </div>
+      </div>
+
       <div className="list-card">
         <div className="list-header">
-          <h2>Move History / Stock Ledger</h2>
+          <h2>Stock Ledger</h2>
+          <p className="muted">Auto-refreshed every few seconds.</p>
         </div>
         <div className="data-table-wrap">
           <table className="data-table">
@@ -1381,11 +1691,12 @@ function MoveHistoryPage({
                 <th>To</th>
                 <th>Quantity</th>
                 <th>Reference</th>
+                <th>Notes</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr className="empty-row"><td colSpan={6}>Loading ledger…</td></tr>}
-              {!loading && entries.length === 0 && <tr className="empty-row"><td colSpan={6}>No stock movements have been recorded yet.</td></tr>}
+              {loading && <tr className="empty-row"><td colSpan={7}>Loading ledger…</td></tr>}
+              {!loading && entries.length === 0 && <tr className="empty-row"><td colSpan={7}>No stock movements have been recorded yet.</td></tr>}
               {!loading && entries.map((entry) => (
                 <tr key={entry.id}>
                   <td>{formatDate(entry.timestamp)}</td>
@@ -1394,6 +1705,7 @@ function MoveHistoryPage({
                   <td>{entry.to_location_name ?? '—'}</td>
                   <td>{entry.quantity}</td>
                   <td>{entry.reference_number ?? '—'}</td>
+                  <td><span className="muted" style={{ fontSize: '12px' }}>{entry.note ?? '—'}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -1416,7 +1728,7 @@ function WarehousesPage({
   const [type, setType] = useState('Internal')
   const [loading, setLoading] = useState(true)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const data = await apiRequest<Warehouse[]>('/locations', 'GET', token ?? undefined)
@@ -1426,7 +1738,7 @@ function WarehousesPage({
     } finally {
       setLoading(false)
     }
-  }
+  }, [pushToast, token])
 
   useEffect(() => {
     load()
@@ -1436,7 +1748,18 @@ function WarehousesPage({
     }, LIVE_SYNC_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [token])
+  }, [load])
+
+  const deleteWarehouse = async (id: number) => {
+    if (!window.confirm('Are you sure you want to delete this warehouse? This will be recorded in history.')) return
+    try {
+      await apiRequest(`/locations/${id}`, 'DELETE', token ?? undefined)
+      pushToast('success', 'Warehouse deleted')
+      load()
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    }
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -1459,10 +1782,36 @@ function WarehousesPage({
     }
   }
 
+  const internalCount = warehouses.filter((wh) => wh.type === 'Internal').length
+  const externalCount = warehouses.length - internalCount
+
   return (
-    <section>
-      <div className="split-layout">
-        <div className="panel-card">
+    <section className="warehouses-page">
+      <div className="operations-overview">
+        <div className="operations-overview-top">
+          <div className="product-title-block">
+            <h2>Warehouses & Locations</h2>
+            <p>Maintain storage points used across receipts, deliveries, and transfers.</p>
+          </div>
+        </div>
+        <div className="product-stats-grid operations-stats-grid">
+          <article className="product-stat-card">
+            <div className="product-stat-label">Total Locations</div>
+            <div className="product-stat-value">{warehouses.length}</div>
+          </article>
+          <article className="product-stat-card">
+            <div className="product-stat-label">Internal</div>
+            <div className="product-stat-value">{internalCount}</div>
+          </article>
+          <article className="product-stat-card">
+            <div className="product-stat-label">External</div>
+            <div className="product-stat-value">{externalCount}</div>
+          </article>
+        </div>
+      </div>
+
+      <div className="split-layout warehouses-layout">
+        <div className="panel-card warehouses-form-card">
           <div className="panel-card-header">Add Warehouse / Location</div>
           <div className="panel-card-body">
             <form onSubmit={submit}>
@@ -1483,9 +1832,10 @@ function WarehousesPage({
           </div>
         </div>
 
-        <div className="list-card">
+        <div className="list-card warehouses-table-card">
           <div className="list-header">
             <h2>Registered Locations</h2>
+            <p className="muted">Delete only when location has no active stock.</p>
           </div>
           <div className="data-table-wrap">
             <table className="data-table">
@@ -1493,15 +1843,21 @@ function WarehousesPage({
                 <tr>
                   <th>Name</th>
                   <th>Type</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr className="empty-row"><td colSpan={2}>Loading…</td></tr>}
-                {!loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={2}>No locations configured yet.</td></tr>}
+                {loading && <tr className="empty-row"><td colSpan={3}>Loading…</td></tr>}
+                {!loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={3}>No locations configured yet.</td></tr>}
                 {!loading && warehouses.map((wh) => (
                   <tr key={wh.id}>
                     <td><strong>{wh.name}</strong></td>
                     <td><span className="badge badge-draft">{wh.type}</span></td>
+                    <td>
+                      <button type="button" className="btn-icon" onClick={() => deleteWarehouse(wh.id)} title="Delete location">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1545,9 +1901,18 @@ function ProfilePage({
   }, [token, pushToast])
 
   return (
-    <section>
-      <div className="panel-card" style={{ maxWidth: '600px' }}>
-        <div className="panel-card-header">My Profile</div>
+    <section className="profile-page">
+      <div className="operations-overview">
+        <div className="operations-overview-top">
+          <div className="product-title-block">
+            <h2>My Profile</h2>
+            <p>Your account identity and access role for this workspace.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel-card profile-card">
+        <div className="panel-card-header">Account Details</div>
         <div className="panel-card-body">
           {loading && <p className="muted">Loading profile…</p>}
           {!loading && !profile && <p className="muted">Unable to load profile. Please try again.</p>}

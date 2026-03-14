@@ -155,11 +155,12 @@ async function initDb() {
 
     CREATE TABLE IF NOT EXISTS Stock_Ledger (
       id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL,
+      product_id INTEGER,
       from_location_id INTEGER,
       to_location_id INTEGER,
-      quantity NUMERIC NOT NULL,
+      quantity NUMERIC NOT NULL DEFAULT 0,
       operation_id INTEGER,
+      note TEXT,
       timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (product_id) REFERENCES Products(id),
       FOREIGN KEY (from_location_id) REFERENCES Locations(id),
@@ -167,6 +168,15 @@ async function initDb() {
       FOREIGN KEY (operation_id) REFERENCES Operations(id)
     );
   `)
+
+  // Migration: Ensure columns exist
+  try {
+    await db.exec('ALTER TABLE Stock_Ledger ADD COLUMN IF NOT EXISTS note TEXT')
+    await db.exec('ALTER TABLE Stock_Ledger ALTER COLUMN quantity SET DEFAULT 0')
+    await db.exec('ALTER TABLE Stock_Ledger ALTER COLUMN product_id DROP NOT NULL')
+  } catch (err) {
+    console.log('Migration note: Stock_Ledger columns check done.')
+  }
 
   const userCountRow = await db.get('SELECT COUNT(*) AS count FROM Users')
   if (!userCountRow || Number(userCountRow.count) === 0) {
