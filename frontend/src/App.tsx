@@ -480,7 +480,7 @@ function AuthPage({
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <div className="auth-logo-icon">C</div>
+          <img className="auth-logo-image" src="/odoo.png" alt="Odoo logo" />
           <div className="auth-logo-text">
             <h2>Core Inventory</h2>
             <p>Inventory Management System</p>
