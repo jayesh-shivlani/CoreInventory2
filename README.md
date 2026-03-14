@@ -124,8 +124,10 @@ npm run dev:frontend
 - `GET /api/products`
 - `POST /api/products`
 - `PUT /api/products/:id`
+- `GET /api/products/:id/stock`
 - `GET /api/operations`
 - `POST /api/operations`
+- `POST /api/operations/:id/status`
 - `POST /api/operations/:id/validate`
 - `GET /api/ledger`
 - `GET /api/locations`

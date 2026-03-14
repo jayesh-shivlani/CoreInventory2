@@ -766,6 +766,22 @@ app.get('/api/dashboard/filters', requireAuth, async (req, res) => {
 app.get('/api/operations', requireAuth, async (req, res) => {
   const db = await getDb()
   const type = req.query.type ? String(req.query.type) : ''
+  const sortBy = req.query.sortBy ? String(req.query.sortBy) : 'created_at'
+  const sortDir = String(req.query.sortDir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC'
+  const orderByClause =
+    sortBy === 'status'
+      ? `
+          CASE o.status
+            WHEN 'Draft' THEN 1
+            WHEN 'Waiting' THEN 2
+            WHEN 'Ready' THEN 3
+            WHEN 'Done' THEN 4
+            WHEN 'Canceled' THEN 5
+            ELSE 99
+          END ${sortDir},
+          o.created_at DESC
+        `
+      : `o.created_at ${sortDir}`
 
   const rows = type
     ? await db.all(
@@ -782,7 +798,7 @@ app.get('/api/operations', requireAuth, async (req, res) => {
           LEFT JOIN Locations src ON src.id = o.source_location_id
           LEFT JOIN Locations dst ON dst.id = o.destination_location_id
           WHERE o.type = ?
-          ORDER BY o.created_at DESC
+          ORDER BY ${orderByClause}
         `,
       type,
     )
@@ -799,7 +815,7 @@ app.get('/api/operations', requireAuth, async (req, res) => {
           FROM Operations o
           LEFT JOIN Locations src ON src.id = o.source_location_id
           LEFT JOIN Locations dst ON dst.id = o.destination_location_id
-          ORDER BY o.created_at DESC
+          ORDER BY ${orderByClause}
         `,
     )
 
@@ -819,12 +835,23 @@ app.post('/api/operations', requireAuth, async (req, res) => {
   }
 
   for (const line of lines) {
+    const productId = Number(line.product_id)
     const qty = Number(line.requested_quantity)
+    const picked = Number(line.picked_quantity ?? 0)
+    const packed = Number(line.packed_quantity ?? 0)
+    if (!Number.isFinite(productId) || productId <= 0) {
+      return res.status(400).json({ message: 'Each line requires a valid product_id' })
+    }
     if (!Number.isFinite(qty) || qty < 0) {
       return res.status(400).json({ message: 'Quantities must be non-negative numbers' })
     }
     if (type !== 'Adjustment' && qty <= 0) {
       return res.status(400).json({ message: 'Quantity must be greater than zero for this operation type' })
+    }
+    if (type === 'Delivery') {
+      if (!Number.isFinite(picked) || picked < 0 || !Number.isFinite(packed) || packed < 0) {
+        return res.status(400).json({ message: 'Picked and packed quantities must be non-negative numbers' })
+      }
     }
   }
 
@@ -868,14 +895,19 @@ app.post('/api/operations', requireAuth, async (req, res) => {
       await db.run('UPDATE Operations SET reference_number = ? WHERE id = ?', referenceNumber, operationId)
 
       for (const line of lines) {
+        const requestedQty = Number(line.requested_quantity)
+        const pickedQty = Number(line.picked_quantity ?? 0)
+        const packedQty = Number(line.packed_quantity ?? 0)
         await db.run(
           `
-            INSERT INTO Operation_Lines (operation_id, product_id, requested_quantity)
-            VALUES (?, ?, ?)
+            INSERT INTO Operation_Lines (operation_id, product_id, requested_quantity, picked_quantity, packed_quantity)
+            VALUES (?, ?, ?, ?, ?)
           `,
           operationId,
           Number(line.product_id),
-          Number(line.requested_quantity),
+          requestedQty,
+          type === 'Delivery' ? pickedQty : requestedQty,
+          type === 'Delivery' ? packedQty : requestedQty,
         )
       }
 
@@ -930,6 +962,9 @@ app.post('/api/operations/:id/validate', requireAuth, async (req, res) => {
     if (operation.status === 'Done') {
       return res.status(400).json({ message: 'Operation is already validated' })
     }
+    if (operation.status === 'Canceled') {
+      return res.status(400).json({ message: 'Canceled operation cannot be validated' })
+    }
 
     const lines = await db.all('SELECT * FROM Operation_Lines WHERE operation_id = ?', operationId)
     if (!lines.length) {
@@ -965,6 +1000,18 @@ app.post('/api/operations/:id/validate', requireAuth, async (req, res) => {
 
         if (operation.type === 'Delivery') {
           const currentSource = await getCurrentQty(db, productId, operation.source_location_id)
+          const picked = Number(line.picked_quantity ?? 0)
+          const packed = Number(line.packed_quantity ?? 0)
+          const effectivePicked = picked > 0 ? picked : requested
+          const effectivePacked = packed > 0 ? packed : requested
+
+          if (effectivePicked < requested || effectivePacked < requested) {
+            throw new Error('Delivery validation requires picked and packed quantities to cover requested quantity')
+          }
+          if (effectivePacked > effectivePicked) {
+            throw new Error('Packed quantity cannot exceed picked quantity')
+          }
+
           if (currentSource < requested) {
             throw new Error('Insufficient stock for delivery validation')
           }
@@ -1091,6 +1138,51 @@ app.delete('/api/operations/:id', requireAuth, async (req, res) => {
     }
   } catch (error) {
     return res.status(500).json({ message: 'Failed to delete operation' })
+  }
+})
+
+app.post('/api/operations/:id/status', requireAuth, async (req, res) => {
+  const operationId = Number(req.params.id)
+  if (!Number.isFinite(operationId)) {
+    return res.status(400).json({ message: 'Invalid operation id' })
+  }
+
+  const nextStatus = String(req.body?.status || '').trim()
+  const allowedStatuses = ['Draft', 'Waiting', 'Ready', 'Canceled']
+  if (!allowedStatuses.includes(nextStatus)) {
+    return res.status(400).json({ message: 'Invalid status value' })
+  }
+
+  const db = await getDb()
+  try {
+    const operation = await db.get('SELECT id, status FROM Operations WHERE id = ?', operationId)
+    if (!operation) {
+      return res.status(404).json({ message: 'Operation not found' })
+    }
+
+    if (operation.status === 'Done') {
+      return res.status(400).json({ message: 'Validated operation status cannot be changed' })
+    }
+
+    if (operation.status === nextStatus) {
+      return res.json({ message: 'Status unchanged', id: operationId, status: operation.status })
+    }
+
+    const transitionMap = {
+      Draft: ['Waiting', 'Ready', 'Canceled'],
+      Waiting: ['Ready', 'Canceled'],
+      Ready: ['Waiting', 'Canceled'],
+      Canceled: ['Draft'],
+    }
+    const allowedNext = transitionMap[operation.status] || []
+    if (!allowedNext.includes(nextStatus)) {
+      return res.status(400).json({ message: `Cannot move status from ${operation.status} to ${nextStatus}` })
+    }
+
+    await db.run('UPDATE Operations SET status = ? WHERE id = ?', nextStatus, operationId)
+    return res.json({ message: 'Status updated', id: operationId, status: nextStatus })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to update operation status' })
   }
 })
 

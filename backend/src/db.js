@@ -148,6 +148,8 @@ async function initDb() {
       operation_id INTEGER NOT NULL,
       product_id INTEGER NOT NULL,
       requested_quantity NUMERIC NOT NULL,
+      picked_quantity NUMERIC NOT NULL DEFAULT 0,
+      packed_quantity NUMERIC NOT NULL DEFAULT 0,
       done_quantity NUMERIC NOT NULL DEFAULT 0,
       FOREIGN KEY (operation_id) REFERENCES Operations(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES Products(id)
@@ -233,6 +235,8 @@ async function initDb() {
     await db.exec('ALTER TABLE Stock_Ledger ADD COLUMN IF NOT EXISTS note TEXT')
     await db.exec('ALTER TABLE Stock_Ledger ALTER COLUMN quantity SET DEFAULT 0')
     await db.exec('ALTER TABLE Stock_Ledger ALTER COLUMN product_id DROP NOT NULL')
+    await db.exec('ALTER TABLE Operation_Lines ADD COLUMN IF NOT EXISTS picked_quantity NUMERIC NOT NULL DEFAULT 0')
+    await db.exec('ALTER TABLE Operation_Lines ADD COLUMN IF NOT EXISTS packed_quantity NUMERIC NOT NULL DEFAULT 0')
   } catch (err) {
     console.log('Migration note: Stock_Ledger columns check done.')
   }

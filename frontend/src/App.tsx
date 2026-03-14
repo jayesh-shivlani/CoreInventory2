@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   NavLink,
@@ -87,6 +87,14 @@ type Toast = {
 type OperationDraftLine = {
   product_id: string
   requested_quantity: string
+  picked_quantity?: string
+  packed_quantity?: string
+}
+
+type ProductStockRow = {
+  location_id: number
+  location_name: string
+  quantity: number
 }
 
 const TOKEN_KEY = 'ims-auth-token'
@@ -713,6 +721,8 @@ function DashboardPage({
     warehouses: [],
     categories: [],
   })
+  const [lowStockProducts, setLowStockProducts] = useState<Product[]>([])
+  const previousLowStockCount = useRef(0)
 
   const query = useMemo(() => {
     const params = new URLSearchParams()
@@ -745,11 +755,21 @@ function DashboardPage({
     const load = async () => {
       setLoading(true)
       try {
-        const raw = await apiRequest<Partial<KPIResponse> | null>(
-          `/dashboard/kpis${query}`,
-          'GET',
-          token ?? undefined,
-        )
+        const [raw, lowStockRows] = await Promise.all([
+          apiRequest<Partial<KPIResponse> | null>(
+            `/dashboard/kpis${query}`,
+            'GET',
+            token ?? undefined,
+          ),
+          apiRequest<Product[]>('/products?lowStockOnly=true', 'GET', token ?? undefined),
+        ])
+        setLowStockProducts(Array.isArray(lowStockRows) ? lowStockRows : [])
+        const latestCount = Array.isArray(lowStockRows) ? lowStockRows.length : 0
+        if (previousLowStockCount.current !== 0 && latestCount > previousLowStockCount.current) {
+          pushToast('info', `Low stock alerts increased to ${latestCount}`)
+        }
+        previousLowStockCount.current = latestCount
+
         const data = (raw ?? {}) as Partial<KPIResponse>
         if (!active) return
         setKpis({
@@ -800,6 +820,26 @@ function DashboardPage({
           </div>
         </div>
       </div>
+
+      {lowStockProducts.length > 0 && (
+        <div className="dashboard-header-card low-stock-alert-card">
+          <div className="list-header dashboard-section-header">
+            <h2>Low Stock Alerts</h2>
+            <span className="alert-count-pill">{lowStockProducts.length} product(s)</span>
+          </div>
+          <div className="low-stock-alert-list">
+            {lowStockProducts.slice(0, 6).map((product) => (
+              <div key={product.id} className="low-stock-alert-item">
+                <strong>{product.name}</strong>
+                <span>{product.sku}</span>
+                <span>
+                  On hand {safeNumber(product.availableStock)} / Reorder min {safeNumber(product.reorder_minimum)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="dashboard-header-card">
         <div className="list-header dashboard-section-header">
@@ -893,6 +933,9 @@ function ProductsPage({
     uoms: [],
   })
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null)
+  const [stockByProductId, setStockByProductId] = useState<Record<number, ProductStockRow[]>>({})
+  const [stockLoadingForProductId, setStockLoadingForProductId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterLocation, setFilterLocation] = useState('')
@@ -1066,6 +1109,31 @@ function ProductsPage({
     setLowStockOnly(false)
   }
 
+  const toggleStockDetails = async (productId: number) => {
+    if (expandedProductId === productId) {
+      setExpandedProductId(null)
+      return
+    }
+
+    setExpandedProductId(productId)
+    if (stockByProductId[productId]) {
+      return
+    }
+
+    setStockLoadingForProductId(productId)
+    try {
+      const rows = await apiRequest<ProductStockRow[]>(`/products/${productId}/stock`, 'GET', token ?? undefined)
+      setStockByProductId((prev) => ({
+        ...prev,
+        [productId]: Array.isArray(rows) ? rows : [],
+      }))
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setStockLoadingForProductId((prev) => (prev === productId ? null : prev))
+    }
+  }
+
   const totalProducts = products.length
   const totalStock = useMemo(
     () => products.reduce((sum, product) => sum + safeNumber(product.availableStock), 0),
@@ -1184,7 +1252,8 @@ function ProductsPage({
                 {loading && <tr className="empty-row"><td colSpan={8}>Loading products…</td></tr>}
                 {!loading && products.length === 0 && <tr className="empty-row"><td colSpan={8}>No products found. Click "+ New Product" to create one.</td></tr>}
                 {!loading && products.map((product) => (
-                  <tr key={product.id}>
+                  <Fragment key={product.id}>
+                  <tr>
                     <td>
                       <div className="product-name-cell">
                         <strong>{product.name}</strong>
@@ -1205,8 +1274,42 @@ function ProductsPage({
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(product)}>
                         Edit
                       </button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => { void toggleStockDetails(product.id) }}>
+                        {expandedProductId === product.id ? 'Hide Stock' : 'View Stock'}
+                      </button>
                     </td>
                   </tr>
+                {expandedProductId === product.id && (
+                  <tr>
+                    <td colSpan={8}>
+                      <div className="inline-stock-card">
+                        {stockLoadingForProductId === product.id && <p className="muted">Loading location-wise stock…</p>}
+                        {stockLoadingForProductId !== product.id && (stockByProductId[product.id] || []).length === 0 && (
+                          <p className="muted">No location-wise stock found for this product.</p>
+                        )}
+                        {stockLoadingForProductId !== product.id && (stockByProductId[product.id] || []).length > 0 && (
+                          <table className="data-table nested-table">
+                            <thead>
+                              <tr>
+                                <th>Location</th>
+                                <th>Quantity</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(stockByProductId[product.id] || []).map((row) => (
+                                <tr key={`${product.id}-${row.location_id}`}>
+                                  <td>{row.location_name}</td>
+                                  <td>{safeNumber(row.quantity)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -1322,14 +1425,18 @@ function OperationsPage({
   const [locations, setLocations] = useState<Warehouse[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [sortBy, setSortBy] = useState<'date' | 'status'>('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const [sourceLocation, setSourceLocation] = useState('')
   const [destinationLocation, setDestinationLocation] = useState('')
   const [supplier, setSupplier] = useState('')
-  const [lines, setLines] = useState<OperationDraftLine[]>([{ product_id: '', requested_quantity: '0' }])
+  const [lines, setLines] = useState<OperationDraftLine[]>([
+    { product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' },
+  ])
 
   const resetDraftForm = () => {
-    setLines([{ product_id: '', requested_quantity: '0' }])
+    setLines([{ product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' }])
     setSupplier('')
     setSourceLocation('')
     setDestinationLocation('')
@@ -1368,6 +1475,29 @@ function OperationsPage({
   const requiresSource = operationType === 'Delivery' || operationType === 'Internal'
   const requiresDestination = operationType === 'Internal'
   const requiresAdjustmentLocation = operationType === 'Adjustment'
+  const isDelivery = operationType === 'Delivery'
+
+  const sortedOperations = useMemo(() => {
+    const statusRank: Record<Operation['status'], number> = {
+      Draft: 1,
+      Waiting: 2,
+      Ready: 3,
+      Done: 4,
+      Canceled: 5,
+    }
+
+    const copy = [...operations]
+    copy.sort((a, b) => {
+      if (sortBy === 'status') {
+        const statusDiff = (statusRank[a.status] ?? 99) - (statusRank[b.status] ?? 99)
+        if (statusDiff !== 0) return sortDir === 'asc' ? statusDiff : -statusDiff
+      }
+
+      const dateDiff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      return sortDir === 'asc' ? dateDiff : -dateDiff
+    })
+    return copy
+  }, [operations, sortBy, sortDir])
   const overRequested =
     operationType === 'Delivery' &&
     lines.some((line) => {
@@ -1402,6 +1532,23 @@ function OperationsPage({
         pushToast('error', 'Quantity must be greater than zero')
         return
       }
+
+      if (isDelivery) {
+        const picked = Number(line.picked_quantity ?? 0)
+        const packed = Number(line.packed_quantity ?? 0)
+        if (!Number.isFinite(picked) || !Number.isFinite(packed) || picked < 0 || packed < 0) {
+          pushToast('error', 'Picked and packed quantities must be non-negative numbers')
+          return
+        }
+        if (mode === 'validate' && (picked < requested || packed < requested)) {
+          pushToast('error', 'For validation, picked and packed quantities must cover requested quantity')
+          return
+        }
+        if (packed > picked) {
+          pushToast('error', 'Packed quantity cannot exceed picked quantity')
+          return
+        }
+      }
     }
     if (requiresSource && !sourceLocation.trim()) {
       pushToast('error', 'Source location is required')
@@ -1430,6 +1577,8 @@ function OperationsPage({
         lines: lines.map((line) => ({
           product_id: Number(line.product_id),
           requested_quantity: Number(line.requested_quantity),
+          picked_quantity: Number(line.picked_quantity ?? 0),
+          packed_quantity: Number(line.packed_quantity ?? 0),
         })),
       })
 
@@ -1451,11 +1600,21 @@ function OperationsPage({
   }
 
   const updateLine = (index: number, patch: Partial<OperationDraftLine>) => {
-    setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)))
+    setLines((prev) =>
+      prev.map((line, i) => {
+        if (i !== index) return line
+        const next = { ...line, ...patch }
+        if (isDelivery && patch.requested_quantity !== undefined && patch.picked_quantity === undefined && patch.packed_quantity === undefined) {
+          next.picked_quantity = patch.requested_quantity
+          next.packed_quantity = patch.requested_quantity
+        }
+        return next
+      }),
+    )
   }
 
   const addLine = () => {
-    setLines((prev) => [...prev, { product_id: '', requested_quantity: '0' }])
+    setLines((prev) => [...prev, { product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' }])
   }
 
   const removeLine = (index: number) => {
@@ -1473,6 +1632,24 @@ function OperationsPage({
     } catch (error) {
       pushToast('error', (error as Error).message)
     }
+  }
+
+  const updateOperationStatus = async (operationId: number, status: 'Draft' | 'Waiting' | 'Ready' | 'Canceled') => {
+    try {
+      await apiRequest(`/operations/${operationId}/status`, 'POST', token ?? undefined, { status })
+      pushToast('success', `Status changed to ${status}`)
+      await fetchData()
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    }
+  }
+
+  const statusActions = (op: Operation): Array<'Waiting' | 'Ready' | 'Canceled' | 'Draft'> => {
+    if (op.status === 'Draft') return ['Waiting', 'Ready', 'Canceled']
+    if (op.status === 'Waiting') return ['Ready', 'Canceled']
+    if (op.status === 'Ready') return ['Waiting', 'Canceled']
+    if (op.status === 'Canceled') return ['Draft']
+    return []
   }
 
   const deleteOperation = async (id: number) => {
@@ -1548,17 +1725,47 @@ function OperationsPage({
               <thead>
                 <tr>
                   <th>Reference</th>
-                  <th>Status</th>
+                  <th>
+                    <button
+                      type="button"
+                      className="table-sort-btn"
+                      onClick={() => {
+                        if (sortBy === 'status') {
+                          setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+                        } else {
+                          setSortBy('status')
+                          setSortDir('asc')
+                        }
+                      }}
+                    >
+                      Status {sortBy === 'status' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                    </button>
+                  </th>
                   <th>Source</th>
                   <th>Destination</th>
-                  <th>Date</th>
+                  <th>
+                    <button
+                      type="button"
+                      className="table-sort-btn"
+                      onClick={() => {
+                        if (sortBy === 'date') {
+                          setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+                        } else {
+                          setSortBy('date')
+                          setSortDir('desc')
+                        }
+                      }}
+                    >
+                      Date {sortBy === 'date' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                    </button>
+                  </th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && <tr className="empty-row"><td colSpan={6}>Loading {statBaseLabel.toLowerCase()}…</td></tr>}
-                {!loading && operations.length === 0 && <tr className="empty-row"><td colSpan={6}>No {statBaseLabel.toLowerCase()} yet. Click "+ New {singularOpLabel}" to create one.</td></tr>}
-                {!loading && operations.map((op) => (
+                {!loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>No {statBaseLabel.toLowerCase()} yet. Click "+ New {singularOpLabel}" to create one.</td></tr>}
+                {!loading && sortedOperations.map((op) => (
                   <tr key={op.id}>
                     <td><strong>{op.reference_number}</strong></td>
                     <td>
@@ -1568,12 +1775,22 @@ function OperationsPage({
                     <td>{op.destination_location_name ?? '—'}</td>
                     <td>{formatDate(op.created_at)}</td>
                     <td>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        {op.status !== 'Done' ? (
+                      <div className="operation-row-actions">
+                        {op.status !== 'Done' && op.status !== 'Canceled' ? (
                           <button type="button" className="btn btn-secondary" onClick={() => validateOperation(op.id)}>Validate</button>
                         ) : (
-                          <span className="muted">Done</span>
+                          <span className="muted">{op.status === 'Done' ? 'Done' : 'Canceled'}</span>
                         )}
+                        {statusActions(op).map((nextStatus) => (
+                          <button
+                            key={`${op.id}-${nextStatus}`}
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => { void updateOperationStatus(op.id, nextStatus) }}
+                          >
+                            {nextStatus}
+                          </button>
+                        ))}
                         {op.status !== 'Done' && (
                           <button type="button" className="btn-icon" onClick={() => deleteOperation(op.id)} title="Delete document">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
@@ -1666,6 +1883,8 @@ function OperationsPage({
                       <tr>
                         <th>Product</th>
                         <th style={{ width: '160px' }}>{operationType === 'Adjustment' ? 'Counted Qty' : 'Demand'}</th>
+                        {isDelivery && <th style={{ width: '140px' }}>Picked</th>}
+                        {isDelivery && <th style={{ width: '140px' }}>Packed</th>}
                         <th style={{ width: '40px' }}></th>
                       </tr>
                     </thead>
@@ -1683,6 +1902,16 @@ function OperationsPage({
                           <td>
                             <input className="form-input" type="number" min={0} value={line.requested_quantity} onChange={(e) => updateLine(index, { requested_quantity: e.target.value })} required />
                           </td>
+                          {isDelivery && (
+                            <td>
+                              <input className="form-input" type="number" min={0} value={line.picked_quantity ?? '0'} onChange={(e) => updateLine(index, { picked_quantity: e.target.value })} required />
+                            </td>
+                          )}
+                          {isDelivery && (
+                            <td>
+                              <input className="form-input" type="number" min={0} value={line.packed_quantity ?? '0'} onChange={(e) => updateLine(index, { packed_quantity: e.target.value })} required />
+                            </td>
+                          )}
                           <td>
                             <button type="button" className="btn-icon" onClick={() => removeLine(index)} title="Remove">✕</button>
                           </td>
