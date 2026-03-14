@@ -1,4 +1,4 @@
-Key Note : "I have updated the website to add more features like signup verification through otp and added some small meaningful changes after the coding time was completed" 
+Key Note : "I have updated the website to add more features like signup verification through otp and added some small meaningful changes after the coding time was completed and those are not covered in the video so please check out the website" 
 
 # Core Inventory IMS
 
