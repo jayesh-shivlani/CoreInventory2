@@ -199,11 +199,19 @@ async function initDb() {
     BEGIN
       FOREACH t IN ARRAY table_names LOOP
         IF to_regclass('public.' || t) IS NOT NULL THEN
-          EXECUTE format(
-            'CREATE POLICY IF NOT EXISTS %I ON public.%I FOR ALL TO authenticated USING (true) WITH CHECK (true)',
-            t || '_authenticated_all',
-            t
-          );
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_policies
+            WHERE schemaname = 'public'
+              AND tablename = t
+              AND policyname = t || '_authenticated_all'
+          ) THEN
+            EXECUTE format(
+              'CREATE POLICY %I ON public.%I FOR ALL TO authenticated USING (true) WITH CHECK (true)',
+              t || '_authenticated_all',
+              t
+            );
+          END IF;
         END IF;
       END LOOP;
     END
