@@ -297,6 +297,29 @@ function AuthPage({
     }
   }, [token, navigate])
 
+  const generateOtp = async () => {
+    if (!email.trim()) {
+      pushToast('error', 'Email is required')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const data = await apiRequest<ResetOtpResponse>('/auth/reset-password', 'POST', undefined, {
+        email,
+      })
+      if (data?.otp) {
+        setGeneratedOtp(data.otp)
+        setOtp(data.otp)
+      }
+      pushToast('info', data?.otp ? `OTP generated: ${data.otp}` : 'OTP generated. Check your reset channel.')
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!email.trim()) {
@@ -331,15 +354,12 @@ function AuthPage({
       }
 
       if (mode === 'reset') {
-        if (!otp.trim() || newPassword.length < 6) {
-          const data = await apiRequest<ResetOtpResponse>('/auth/reset-password', 'POST', undefined, {
-            email,
-          })
-          if (data?.otp) {
-            setGeneratedOtp(data.otp)
-            setOtp(data.otp)
-          }
-          pushToast('info', data?.otp ? `OTP generated: ${data.otp}` : 'OTP generated. Check your reset channel.')
+        if (!otp.trim()) {
+          pushToast('error', 'OTP is required. Click Generate OTP first if needed.')
+          return
+        }
+        if (newPassword.length < 6) {
+          pushToast('error', 'New password must be at least 6 characters')
           return
         }
 
@@ -416,12 +436,17 @@ function AuthPage({
                   minLength={6}
                 />
               </label>
+              <div className="action-row">
+                <button type="button" className="ghost-btn" onClick={generateOtp} disabled={busy}>
+                  {busy ? 'Generating...' : 'Generate OTP'}
+                </button>
+              </div>
               {generatedOtp && <p className="muted">Generated OTP: {generatedOtp}</p>}
             </>
           )}
 
           <button type="submit" className="primary-btn" disabled={busy}>
-            {busy ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'signup' ? 'Create account' : 'Reset password'}
+            {busy ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'signup' ? 'Create account' : 'Reset Password'}
           </button>
           {import.meta.env.DEV && mode === 'login' && (
             <button

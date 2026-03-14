@@ -391,6 +391,11 @@ dd {
   flex-wrap: wrap;
 }
 
+.action-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .tab {
   background: #f7f6f3;
   border-color: var(--line);
