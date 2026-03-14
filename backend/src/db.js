@@ -1,0 +1,155 @@
+const path = require('path')
+const fs = require('fs')
+const { open } = require('sqlite')
+const sqlite3 = require('sqlite3')
+const bcrypt = require('bcryptjs')
+
+const DB_PATH = process.env.DB_PATH || './data/coreinventory.db'
+
+let dbPromise
+
+async function getDb() {
+  if (!dbPromise) {
+    const fullPath = path.isAbsolute(DB_PATH)
+      ? DB_PATH
+      : path.join(process.cwd(), DB_PATH)
+
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true })
+
+    dbPromise = open({
+      filename: fullPath,
+      driver: sqlite3.Database,
+    })
+
+    const db = await dbPromise
+    await db.exec('PRAGMA foreign_keys = ON;')
+  }
+
+  return dbPromise
+}
+
+async function ensureLocationByName(db, name, type = 'Internal') {
+  if (!name) return null
+  const existing = await db.get('SELECT id, name, type FROM Locations WHERE name = ?', name)
+  if (existing) return existing
+
+  const result = await db.run('INSERT INTO Locations (name, type) VALUES (?, ?)', name, type)
+  return { id: result.lastID, name, type }
+}
+
+function buildReference(type, id) {
+  const prefix =
+    type === 'Receipt'
+      ? 'RCV'
+      : type === 'Delivery'
+        ? 'DEL'
+        : type === 'Internal'
+          ? 'INT'
+          : 'ADJ'
+
+  return `${prefix}-${String(id).padStart(6, '0')}`
+}
+
+async function initDb() {
+  const db = await getDb()
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS Users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'Warehouse Staff',
+      otp_code TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS Locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS Products (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      sku TEXT NOT NULL UNIQUE,
+      category TEXT NOT NULL,
+      unit_of_measure TEXT NOT NULL,
+      reorder_minimum INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS Stock_Quants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      location_id INTEGER NOT NULL,
+      quantity REAL NOT NULL DEFAULT 0,
+      UNIQUE(product_id, location_id),
+      FOREIGN KEY (product_id) REFERENCES Products(id) ON DELETE CASCADE,
+      FOREIGN KEY (location_id) REFERENCES Locations(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS Operations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reference_number TEXT,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Draft',
+      supplier TEXT,
+      source_location_id INTEGER,
+      destination_location_id INTEGER,
+      created_by INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (source_location_id) REFERENCES Locations(id),
+      FOREIGN KEY (destination_location_id) REFERENCES Locations(id),
+      FOREIGN KEY (created_by) REFERENCES Users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS Operation_Lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      operation_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      requested_quantity REAL NOT NULL,
+      done_quantity REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY (operation_id) REFERENCES Operations(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES Products(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS Stock_Ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      from_location_id INTEGER,
+      to_location_id INTEGER,
+      quantity REAL NOT NULL,
+      operation_id INTEGER,
+      timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (product_id) REFERENCES Products(id),
+      FOREIGN KEY (from_location_id) REFERENCES Locations(id),
+      FOREIGN KEY (to_location_id) REFERENCES Locations(id),
+      FOREIGN KEY (operation_id) REFERENCES Operations(id)
+    );
+  `)
+
+  const userCountRow = await db.get('SELECT COUNT(*) AS count FROM Users')
+  if (!userCountRow || userCountRow.count === 0) {
+    const hashed = await bcrypt.hash('demo12345', 10)
+    await db.run(
+      'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
+      'Demo Manager',
+      'demo@coreinventory.app',
+      hashed,
+      'Manager',
+    )
+  }
+
+  await ensureLocationByName(db, 'Main Warehouse', 'Internal')
+  await ensureLocationByName(db, 'Vendor Location', 'Vendor')
+  await ensureLocationByName(db, 'Customer Location', 'Customer')
+
+  return db
+}
+
+module.exports = {
+  buildReference,
+  ensureLocationByName,
+  getDb,
+  initDb,
+}
