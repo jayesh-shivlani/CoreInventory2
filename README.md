@@ -1,8 +1,12 @@
+Key Note : "I have updated the website to add more features like signup verification through otp and added some small meaningful changes after the coding time was completed" 
+
 # Core Inventory IMS
 
 Core Inventory IMS is a full-stack inventory management system for product cataloging, warehouse stock control, and internal logistics operations.
 
 Live application: https://coreinventory.onrender.com
+
+video url : https://drive.google.com/file/d/1rprBFxXs6ZmwSgB-RUAOZ2p4K6txWbzU/view?usp=drive_link
 
 ## Project Snapshot
 
