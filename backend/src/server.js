@@ -425,7 +425,7 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
 
     const totalRow = await db.get(
       `
-        SELECT COALESCE(SUM(sq.quantity), 0) AS totalProductsInStock
+        SELECT COALESCE(SUM(sq.quantity), 0)::INT AS totalProductsInStock
         FROM Stock_Quants sq
         JOIN Products p ON p.id = sq.product_id
         JOIN Locations l ON l.id = sq.location_id
@@ -436,7 +436,7 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
 
     const lowRow = await db.get(
       `
-        SELECT COUNT(*) AS lowOrOutOfStockItems
+        SELECT COUNT(*)::INT AS lowOrOutOfStockItems
         FROM (
           SELECT p.id, p.reorder_minimum, COALESCE(SUM(sq.quantity), 0) AS total_quantity
           FROM Products p
@@ -444,7 +444,7 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
           LEFT JOIN Locations l ON l.id = sq.location_id
           ${productWhere}
           GROUP BY p.id, p.reorder_minimum
-          HAVING total_quantity <= p.reorder_minimum
+          HAVING COALESCE(SUM(sq.quantity), 0) <= p.reorder_minimum
         ) t
       `,
       ...productValues,
@@ -470,7 +470,7 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
 
     const pendingReceiptRow = await db.get(
       `
-        SELECT COUNT(*) AS pendingReceipts
+        SELECT COUNT(*)::INT AS pendingReceipts
         FROM Operations o
         LEFT JOIN Locations src ON src.id = o.source_location_id
         LEFT JOIN Locations dst ON dst.id = o.destination_location_id
@@ -483,7 +483,7 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
 
     const pendingDeliveryRow = await db.get(
       `
-        SELECT COUNT(*) AS pendingDeliveries
+        SELECT COUNT(*)::INT AS pendingDeliveries
         FROM Operations o
         LEFT JOIN Locations src ON src.id = o.source_location_id
         LEFT JOIN Locations dst ON dst.id = o.destination_location_id
@@ -496,7 +496,7 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
 
     const internalRow = await db.get(
       `
-        SELECT COUNT(*) AS scheduledInternalTransfers
+        SELECT COUNT(*)::INT AS scheduledInternalTransfers
         FROM Operations o
         LEFT JOIN Locations src ON src.id = o.source_location_id
         LEFT JOIN Locations dst ON dst.id = o.destination_location_id
@@ -515,6 +515,7 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
       scheduledInternalTransfers: Number(internalRow?.scheduledInternalTransfers || 0),
     })
   } catch (error) {
+    console.error('KPIs error:', error)
     return res.status(500).json({ message: 'Failed to load dashboard KPIs' })
   }
 })
