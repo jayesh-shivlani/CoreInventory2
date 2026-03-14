@@ -56,7 +56,7 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
       text: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
       html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
     })
-    
+
     if (response.error) {
       console.error('Resend returned an error:', response.error)
       throw new Error(response.error.message || 'Email sending failed via Resend')
@@ -66,7 +66,7 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
   } catch (error) {
     console.error('Email sending failed:', error)
     if (process.env.NODE_ENV !== 'production') {
-      console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`) 
+      console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`)
       return { delivered: false }
     }
     throw new Error('Email service failed to deliver OTP')
@@ -626,7 +626,7 @@ app.get('/api/operations', requireAuth, async (req, res) => {
 
   const rows = type
     ? await db.all(
-        `
+      `
           SELECT
             o.id,
             o.reference_number,
@@ -641,10 +641,10 @@ app.get('/api/operations', requireAuth, async (req, res) => {
           WHERE o.type = ?
           ORDER BY o.created_at DESC
         `,
-        type,
-      )
+      type,
+    )
     : await db.all(
-        `
+      `
           SELECT
             o.id,
             o.reference_number,
@@ -658,7 +658,7 @@ app.get('/api/operations', requireAuth, async (req, res) => {
           LEFT JOIN Locations dst ON dst.id = o.destination_location_id
           ORDER BY o.created_at DESC
         `,
-      )
+    )
 
   return res.json(rows)
 })

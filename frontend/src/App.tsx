@@ -256,55 +256,55 @@ function ProtectedLayout({
           <div className="sidebar-nav-section">
             <div className="sidebar-section-label">Overview</div>
             <NavLink to="/dashboard">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
               Dashboard
             </NavLink>
           </div>
           <div className="sidebar-nav-section">
             <div className="sidebar-section-label">Catalog</div>
             <NavLink to="/products">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>
               Products
             </NavLink>
           </div>
           <div className="sidebar-nav-section">
             <div className="sidebar-section-label">Operations</div>
             <NavLink to="/operations/receipts">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
               Receipts
             </NavLink>
             <NavLink to="/operations/deliveries">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="3" width="15" height="13" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>
               Delivery Orders
             </NavLink>
             <NavLink to="/operations/transfers">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
               Internal Transfers
             </NavLink>
             <NavLink to="/operations/adjustments">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
               Inventory Adjustment
             </NavLink>
             <NavLink to="/move-history">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="14 2 14 8 20 8"/><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="14 2 14 8 20 8" /><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9.34" /><polygon points="18 2 22 6 12 16 8 16 8 12 18 2" /></svg>
               Move History
             </NavLink>
           </div>
           <div className="sidebar-nav-section">
             <div className="sidebar-section-label">Settings &amp; Account</div>
             <NavLink to="/settings/warehouses">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
               Warehouses
             </NavLink>
             <NavLink to="/profile">
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
               My Profile
             </NavLink>
           </div>
         </nav>
         <div className="sidebar-footer">
           <button type="button" className="logout-btn" onClick={onLogout}>
-            <svg style={{width:'18px',height:'18px',flexShrink:0,opacity:0.7}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <svg style={{ width: '18px', height: '18px', flexShrink: 0, opacity: 0.7 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
             Logout
           </button>
         </div>
@@ -508,7 +508,7 @@ function AuthPage({
             <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{width:'100%', padding:'9px 16px', marginTop:'8px'}} disabled={busy}>
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '9px 16px', marginTop: '8px' }} disabled={busy}>
             {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
           {authError && (
@@ -516,7 +516,7 @@ function AuthPage({
           )}
 
           {mode === 'login' && (
-            <button type="button" className="link-btn" style={{marginTop:'14px', display:'block'}} onClick={() => {
+            <button type="button" className="link-btn" style={{ marginTop: '14px', display: 'block' }} onClick={() => {
               setShowReset((prev) => !prev)
               setResetStep('request')
               setResetOtp('')
@@ -534,7 +534,7 @@ function AuthPage({
                 <input className="form-input" type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} required />
               </div>
               {resetStep === 'verify' && otpSentTo && (
-                <p className="muted" style={{fontSize:'12px',marginBottom:'10px'}}>OTP sent to {otpSentTo}</p>
+                <p className="muted" style={{ fontSize: '12px', marginBottom: '10px' }}>OTP sent to {otpSentTo}</p>
               )}
               {resetStep === 'verify' && (
                 <>
@@ -548,7 +548,7 @@ function AuthPage({
                   </div>
                 </>
               )}
-              <div style={{display:'flex', gap:'8px', marginTop:'4px'}}>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                 <button type="button" className="btn btn-secondary" onClick={requestResetOtp} disabled={resetBusy || resendCooldown > 0}>
                   {resetBusy ? 'Sending…' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resetStep === 'request' ? 'Send OTP' : 'Resend OTP'}
                 </button>
@@ -698,7 +698,7 @@ function DashboardPage({
           </div>
         </div>
       </div>
-      {loading && <p className="muted" style={{textAlign:'center',padding:'20px'}}>Loading KPI data…</p>}
+      {loading && <p className="muted" style={{ textAlign: 'center', padding: '20px' }}>Loading KPI data…</p>}
     </section>
   )
 }
@@ -1166,8 +1166,8 @@ function OperationsPage({
 
   const opLabel = operationType === 'Receipt' ? 'Receipts'
     : operationType === 'Delivery' ? 'Delivery Orders'
-    : operationType === 'Internal' ? 'Internal Transfers'
-    : 'Inventory Adjustments'
+      : operationType === 'Internal' ? 'Internal Transfers'
+        : 'Inventory Adjustments'
 
   return (
     <section>
@@ -1242,7 +1242,7 @@ function OperationsPage({
           <div className="form-sheet">
             <div className="form-title-area">
               <div className="form-doc-subtitle">{opLabel}</div>
-              <h2 style={{fontSize:'22px',fontWeight:700,color:'var(--text)',marginTop:'4px'}}>New {operationType === 'Internal' ? 'Internal Transfer' : operationType}</h2>
+              <h2 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text)', marginTop: '4px' }}>New {operationType === 'Internal' ? 'Internal Transfer' : operationType}</h2>
             </div>
 
             <div className="field-row">
@@ -1296,8 +1296,8 @@ function OperationsPage({
                   <thead>
                     <tr>
                       <th>Product</th>
-                      <th style={{width:'160px'}}>{operationType === 'Adjustment' ? 'Counted Qty' : 'Demand'}</th>
-                      <th style={{width:'40px'}}></th>
+                      <th style={{ width: '160px' }}>{operationType === 'Adjustment' ? 'Counted Qty' : 'Demand'}</th>
+                      <th style={{ width: '40px' }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1323,7 +1323,7 @@ function OperationsPage({
                 </table>
                 <button type="button" className="add-line-btn" onClick={addLine}>+ Add a line</button>
                 {overRequested && (
-                  <p className="warning-text" style={{marginTop:'12px'}}>⚠️ One or more quantities exceed available stock.</p>
+                  <p className="warning-text" style={{ marginTop: '12px' }}>⚠️ One or more quantities exceed available stock.</p>
                 )}
               </div>
             </div>
@@ -1546,7 +1546,7 @@ function ProfilePage({
 
   return (
     <section>
-      <div className="panel-card" style={{maxWidth:'600px'}}>
+      <div className="panel-card" style={{ maxWidth: '600px' }}>
         <div className="panel-card-header">My Profile</div>
         <div className="panel-card-body">
           {loading && <p className="muted">Loading profile…</p>}

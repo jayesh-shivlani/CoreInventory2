@@ -1,23 +1,46 @@
-# Core Inventory IMS Frontend
+# Core Inventory Frontend
 
-Frontend for the Core Inventory Management System built with React + TypeScript + Vite.
+React + TypeScript frontend for Core Inventory IMS.
 
-## Included Modules
+## Features
 
-- Authentication: Login, Sign Up, OTP password reset flow
-- Dashboard: KPI cards with dynamic filters
-- Products: Product create form and list table with SKU search
-- Operations: Receipts, Delivery Orders, Internal Transfers, Stock Adjustments
-- Move History: Read-only stock ledger table
-- Settings: Warehouse/location management
-- Profile: My Profile view and sidebar logout
+- Authentication flows
+	- Login
+	- Sign up
+	- OTP-based password reset
+- Operational dashboard with KPI filters
+- Product catalog and inventory views
+- Operation management
+	- Receipts
+	- Deliveries
+	- Internal transfers
+	- Adjustments
+- Move history (stock ledger)
+- Warehouse/location settings
+- User profile and session handling
 
-## API Configuration
+## Stack
 
-The app reads API base from `VITE_API_URL`.
+- React 19
+- TypeScript
+- React Router
+- Vite 8
+- ESLint 9
 
-- Default behavior: if `VITE_API_URL` is not set, frontend calls `/api`
-- Example `.env` file:
+## Environment Configuration
+
+The app reads API base URL from `VITE_API_URL`.
+
+- If `VITE_API_URL` is omitted, requests go to `/api`
+- In local development, Vite proxy forwards `/api` to `http://127.0.0.1:4000`
+
+Create local env file:
+
+```bash
+copy .env.example .env
+```
+
+Example value:
 
 ```bash
 VITE_API_URL=http://localhost:4000/api
@@ -31,14 +54,24 @@ npm install
 npm run dev
 ```
 
+Default dev URL: `http://localhost:5173`
+
+## Scripts
+
+- `npm run dev` : start Vite dev server
+- `npm run build` : TypeScript build + production bundle
+- `npm run preview` : preview production build locally
+- `npm run lint` : run ESLint
+
 ## Production Build
 
 ```bash
-cd frontend
 npm run build
 ```
 
+Build output directory: `dist/`
+
 ## Notes
 
-- Authentication token is stored in localStorage key `ims-auth-token`
-- In development mode only, login screen includes a quick access button for UI testing without backend auth
+- Auth token key in local storage: `ims-auth-token`
+- UI development mode includes helper behavior for faster testing workflows
