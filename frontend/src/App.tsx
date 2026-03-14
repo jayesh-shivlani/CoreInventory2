@@ -229,40 +229,93 @@ function ProtectedLayout({
     return <Navigate to="/auth" replace />
   }
 
-  const breadcrumb = location.pathname
+  const segments = location.pathname
     .split('/')
     .filter(Boolean)
-    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
-    .join(' > ')
+    .map((chunk) =>
+      chunk.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    )
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <p>Core Inventory</p>
-          <h1>IMS Console</h1>
+          <div className="sidebar-brand-title">Core Inventory</div>
+          <div className="sidebar-brand-sub">Inventory Management System</div>
         </div>
         <nav className="sidebar-nav" aria-label="Primary">
-          <NavLink to="/dashboard">Dashboard</NavLink>
-          <NavLink to="/products">Products</NavLink>
-          <NavLink to="/operations/receipts">Receipts</NavLink>
-          <NavLink to="/operations/deliveries">Delivery Orders</NavLink>
-          <NavLink to="/operations/transfers">Internal Transfers</NavLink>
-          <NavLink to="/operations/adjustments">Inventory Adjustment</NavLink>
-          <NavLink to="/move-history">Move History</NavLink>
-          <NavLink to="/settings/warehouses">Warehouse Settings</NavLink>
-          <NavLink to="/profile">My Profile</NavLink>
+          <div className="sidebar-nav-section">
+            <div className="sidebar-section-label">Overview</div>
+            <NavLink to="/dashboard">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              Dashboard
+            </NavLink>
+          </div>
+          <div className="sidebar-nav-section">
+            <div className="sidebar-section-label">Catalog</div>
+            <NavLink to="/products">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              Products
+            </NavLink>
+          </div>
+          <div className="sidebar-nav-section">
+            <div className="sidebar-section-label">Operations</div>
+            <NavLink to="/operations/receipts">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Receipts
+            </NavLink>
+            <NavLink to="/operations/deliveries">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+              Delivery Orders
+            </NavLink>
+            <NavLink to="/operations/transfers">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+              Internal Transfers
+            </NavLink>
+            <NavLink to="/operations/adjustments">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+              Inventory Adjustment
+            </NavLink>
+            <NavLink to="/move-history">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="14 2 14 8 20 8"/><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+              Move History
+            </NavLink>
+          </div>
+          <div className="sidebar-nav-section">
+            <div className="sidebar-section-label">Settings &amp; Account</div>
+            <NavLink to="/settings/warehouses">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              Warehouses
+            </NavLink>
+            <NavLink to="/profile">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              My Profile
+            </NavLink>
+          </div>
         </nav>
-        <button type="button" className="ghost-btn" onClick={onLogout}>
-          Logout
-        </button>
+        <div className="sidebar-footer">
+          <button type="button" className="logout-btn" onClick={onLogout}>
+            <svg style={{width:'18px',height:'18px',flexShrink:0,opacity:0.7}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Logout
+          </button>
+        </div>
       </aside>
-      <main className="content">
+      <div className="main-area">
         <header className="topbar">
-          <span>{breadcrumb || 'Dashboard'}</span>
+          <div className="topbar-breadcrumb">
+            <span>Inventory</span>
+            {segments.map((seg, i) => (
+              <span key={i}>
+                <span className="sep">›</span>
+                <span className={i === segments.length - 1 ? 'current' : ''}>{seg}</span>
+              </span>
+            ))}
+          </div>
         </header>
-        <Outlet />
-      </main>
+        <div className="page-content">
+          <Outlet />
+        </div>
+      </div>
     </div>
   )
 }
@@ -279,6 +332,7 @@ function AuthPage({
   const navigate = useNavigate()
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [busy, setBusy] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -400,146 +454,100 @@ function AuthPage({
       }
 
     } catch (error) {
-      pushToast('error', (error as Error).message)
+      const msg = (error as Error).message
+      setAuthError(msg)
+      pushToast('error', msg)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="auth-wrap">
-      <section className="auth-card">
-        <h2>Core Inventory IMS</h2>
-        <p>Centralized stock control for receipts, deliveries, transfers, and adjustments.</p>
-        <div className="tab-row">
-          <button type="button" className={mode === 'login' ? 'tab active' : 'tab'} onClick={() => setMode('login')}>
-            Login
-          </button>
-          <button type="button" className={mode === 'signup' ? 'tab active' : 'tab'} onClick={() => setMode('signup')}>
-            Sign Up
-          </button>
+    <div className="auth-page">
+      <div className="auth-card">
+        <div className="auth-logo">
+          <div className="auth-logo-icon">C</div>
+          <div className="auth-logo-text">
+            <h2>Core Inventory</h2>
+            <p>Inventory Management System</p>
+          </div>
         </div>
 
-        <form className="form-grid" onSubmit={submit}>
-          {mode === 'signup' && (
-            <label>
-              Full Name
-              <input value={name} onChange={(e) => setName(e.target.value)} required />
-            </label>
-          )}
-          <label>
-            Email
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-          </label>
+        <div className="auth-tabs">
+          <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null) }}>Sign In</button>
+          <button type="button" className={`auth-tab${mode === 'signup' ? ' active' : ''}`} onClick={() => { setMode('signup'); setAuthError(null) }}>Create Account</button>
+        </div>
 
-          <button type="submit" className="primary-btn" disabled={busy}>
-            {busy ? 'Please wait...' : mode === 'login' ? 'Login' : 'Create account'}
+        <form onSubmit={submit}>
+          {mode === 'signup' && (
+            <div className="form-field">
+              <label className="form-field-label">Full Name</label>
+              <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" required />
+            </div>
+          )}
+          <div className="form-field">
+            <label className="form-field-label">Email Address</label>
+            <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
+          </div>
+          <div className="form-field">
+            <label className="form-field-label">Password</label>
+            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
+          </div>
+
+          <button type="submit" className="btn btn-primary" style={{width:'100%', padding:'9px 16px', marginTop:'8px'}} disabled={busy}>
+            {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
+          {authError && (
+            <div className="auth-error">{authError}</div>
+          )}
 
           {mode === 'login' && (
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => {
-                setShowReset((prev) => !prev)
-                setResetStep('request')
-                setResetOtp('')
-                setResetNewPassword('')
-                setResetEmail(email)
-                setOtpSentTo('')
-                setResendCooldown(0)
-              }}
-            >
-              {showReset ? 'Close reset password' : 'Reset password'}
-            </button>
+            <button type="button" className="link-btn" style={{marginTop:'14px', display:'block'}} onClick={() => {
+              setShowReset((prev) => !prev)
+              setResetStep('request')
+              setResetOtp('')
+              setResetNewPassword('')
+              setResetEmail(email)
+              setOtpSentTo('')
+              setResendCooldown(0)
+            }}>{showReset ? 'Cancel password reset' : 'Forgot password?'}</button>
           )}
 
           {mode === 'login' && showReset && (
             <div className="reset-box">
-              <h3>Reset Password</h3>
-              <label>
-                Email
-                <input
-                  type="email"
-                  value={resetEmail}
-                  onChange={(e) => setResetEmail(e.target.value)}
-                  required
-                />
-              </label>
-
+              <div className="form-field">
+                <label className="form-field-label">Email for reset</label>
+                <input className="form-input" type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} required />
+              </div>
               {resetStep === 'verify' && otpSentTo && (
-                <p className="muted">OTP sent to {otpSentTo}</p>
+                <p className="muted" style={{fontSize:'12px',marginBottom:'10px'}}>OTP sent to {otpSentTo}</p>
               )}
-
               {resetStep === 'verify' && (
                 <>
-                  <label>
-                    OTP Code
-                    <input value={resetOtp} onChange={(e) => setResetOtp(e.target.value)} required />
-                  </label>
-                  <label>
-                    New Password
-                    <input
-                      type="password"
-                      value={resetNewPassword}
-                      onChange={(e) => setResetNewPassword(e.target.value)}
-                      minLength={6}
-                      required
-                    />
-                  </label>
+                  <div className="form-field">
+                    <label className="form-field-label">OTP Code</label>
+                    <input className="form-input" value={resetOtp} onChange={(e) => setResetOtp(e.target.value)} required />
+                  </div>
+                  <div className="form-field">
+                    <label className="form-field-label">New Password</label>
+                    <input className="form-input" type="password" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} minLength={6} required />
+                  </div>
                 </>
               )}
-
-              <div className="action-row">
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={requestResetOtp}
-                  disabled={resetBusy || resendCooldown > 0}
-                >
-                  {resetBusy
-                    ? resetStep === 'request'
-                      ? 'Sending...'
-                      : 'Sending again...'
-                    : resendCooldown > 0
-                      ? `Resend OTP in ${resendCooldown}s`
-                      : resetStep === 'request'
-                        ? 'Send OTP'
-                        : 'Resend OTP'}
+              <div style={{display:'flex', gap:'8px', marginTop:'4px'}}>
+                <button type="button" className="btn btn-secondary" onClick={requestResetOtp} disabled={resetBusy || resendCooldown > 0}>
+                  {resetBusy ? 'Sending…' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resetStep === 'request' ? 'Send OTP' : 'Resend OTP'}
                 </button>
                 {resetStep === 'verify' && (
-                  <button type="button" className="primary-btn" onClick={submitPasswordReset} disabled={resetBusy}>
-                    {resetBusy ? 'Resetting...' : 'Reset Password'}
+                  <button type="button" className="btn btn-primary" onClick={submitPasswordReset} disabled={resetBusy}>
+                    {resetBusy ? 'Resetting…' : 'Reset Password'}
                   </button>
                 )}
               </div>
             </div>
           )}
-
-          {import.meta.env.DEV && mode === 'login' && (
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => {
-                onLogin('dev-token')
-                navigate('/dashboard', { replace: true })
-              }}
-            >
-              Development quick access
-            </button>
-          )}
         </form>
-      </section>
+      </div>
     </div>
   )
 }
@@ -629,78 +637,57 @@ function DashboardPage({
   }, [query, token, pushToast])
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Inventory Dashboard</h2>
-      </div>
-
-      <div className="filters-grid">
-        <label>
-          Document Type
-          <select value={docType} onChange={(e) => setDocType(e.target.value)}>
-            <option value="">All</option>
-            {filterOptions.documentTypes.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All</option>
-            {filterOptions.statuses.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Warehouse
-          <select value={warehouse} onChange={(e) => setWarehouse(e.target.value)}>
-            <option value="">All</option>
-            {filterOptions.warehouses.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Category
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            <option value="">All</option>
-            {filterOptions.categories.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {loading ? (
-        <p className="muted">Loading dashboard...</p>
-      ) : (
+    <section>
+      <div className="dashboard-header-card">
+        <div className="dashboard-title">Inventory Dashboard</div>
         <div className="kpi-grid">
           <KpiCard label="Total Products in Stock" value={kpis.totalProductsInStock} />
-          <KpiCard label="Low / Out of Stock" value={kpis.lowOrOutOfStockItems} />
+          <KpiCard label="Low / Out of Stock" value={kpis.lowOrOutOfStockItems} variant="warning" />
           <KpiCard label="Pending Receipts" value={kpis.pendingReceipts} />
           <KpiCard label="Pending Deliveries" value={kpis.pendingDeliveries} />
-          <KpiCard label="Internal Transfers Scheduled" value={kpis.scheduledInternalTransfers} />
+          <KpiCard label="Transfers Scheduled" value={kpis.scheduledInternalTransfers} variant="success" />
         </div>
-      )}
+        <div className="filters-row">
+          <div className="filter-group">
+            <label className="filter-label">Document Type</label>
+            <select className="form-select" value={docType} onChange={(e) => setDocType(e.target.value)}>
+              <option value="">All</option>
+              {filterOptions.documentTypes.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <div className="filter-group">
+            <label className="filter-label">Status</label>
+            <select className="form-select" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">All</option>
+              {filterOptions.statuses.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <div className="filter-group">
+            <label className="filter-label">Warehouse</label>
+            <select className="form-select" value={warehouse} onChange={(e) => setWarehouse(e.target.value)}>
+              <option value="">All</option>
+              {filterOptions.warehouses.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <div className="filter-group">
+            <label className="filter-label">Category</label>
+            <select className="form-select" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">All</option>
+              {filterOptions.categories.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+      {loading && <p className="muted" style={{textAlign:'center',padding:'20px'}}>Loading KPI data…</p>}
     </section>
   )
 }
 
-function KpiCard({ label, value }: { label: string; value: number }) {
+function KpiCard({ label, value, variant }: { label: string; value: number; variant?: 'warning' | 'success' }) {
   return (
-    <article className="kpi-card">
-      <p>{label}</p>
-      <strong>{value}</strong>
+    <article className={`kpi-card${variant === 'warning' ? ' kpi-warning' : variant === 'success' ? ' kpi-success' : ''}`}>
+      <div className="kpi-label">{label}</div>
+      <div className="kpi-value">{value}</div>
     </article>
   )
 }
@@ -712,6 +699,7 @@ function ProductsPage({
   token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
 }) {
+  const [viewMode, setViewMode] = useState<'list' | 'form'>('list')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
@@ -737,6 +725,11 @@ function ProductsPage({
     setReorderMinimum('0')
   }
 
+  const startNew = () => {
+    resetForm()
+    setViewMode('form')
+  }
+
   const startEdit = (product: Product) => {
     setEditingProductId(product.id)
     setName(product.name)
@@ -745,6 +738,7 @@ function ProductsPage({
     setUom(product.unit_of_measure)
     setReorderMinimum(String(safeNumber(product.reorder_minimum)))
     setInitialStock('0')
+    setViewMode('form')
   }
 
   const load = async () => {
@@ -812,6 +806,7 @@ function ProductsPage({
 
       resetForm()
       load()
+      setViewMode('list')
     } catch (error) {
       pushToast('error', (error as Error).message)
     } finally {
@@ -820,136 +815,100 @@ function ProductsPage({
   }
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Products</h2>
-      </div>
-
-      <div className="split-grid">
-        <form className="form-grid card" onSubmit={submit}>
-          <h3>Create / Update Product</h3>
-          <label>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} required />
-          </label>
-          <label>
-            SKU / Code
-            <input value={sku} onChange={(e) => setSku(e.target.value)} required />
-          </label>
-          <label>
-            Category
-            <input value={category} onChange={(e) => setCategory(e.target.value)} required />
-          </label>
-          <label>
-            Unit of Measure
-            <input value={uom} onChange={(e) => setUom(e.target.value)} required />
-          </label>
-          <label>
-            Initial Stock
-            <input
-              type="number"
-              min={0}
-              value={initialStock}
-              onChange={(e) => setInitialStock(e.target.value)}
-              disabled={editingProductId !== null}
-            />
-          </label>
-          <label>
-            Reorder Minimum
-            <input
-              type="number"
-              min={0}
-              value={reorderMinimum}
-              onChange={(e) => setReorderMinimum(e.target.value)}
-            />
-          </label>
-          <button className="primary-btn" type="submit" disabled={saving}>
-            {saving ? 'Saving...' : editingProductId ? 'Update Product' : 'Save Product'}
-          </button>
-          {editingProductId && (
-            <button type="button" className="ghost-btn" onClick={resetForm}>
-              Cancel Editing
-            </button>
-          )}
-        </form>
-
-        <div className="card">
-          <div className="table-toolbar">
-            <h3>Inventory List</h3>
-            <div className="table-search">
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by SKU or name"
-              />
-              <input
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                placeholder="Filter category"
-              />
-              <input
-                value={filterLocation}
-                onChange={(e) => setFilterLocation(e.target.value)}
-                placeholder="Filter location"
-              />
-              <label>
-                <input
-                  type="checkbox"
-                  checked={lowStockOnly}
-                  onChange={(e) => setLowStockOnly(e.target.checked)}
-                />
-                Low stock only
-              </label>
-              <button type="button" className="ghost-btn" onClick={load}>
-                Search
-              </button>
-            </div>
+    <section>
+      {viewMode === 'list' && (
+        <div className="list-card">
+          <div className="list-header">
+            <h2>Products</h2>
+            <button type="button" className="btn btn-primary" onClick={startNew}>+ New</button>
           </div>
-          <div className="table-wrap">
-            <table>
+          <div className="list-toolbar">
+            <input className="search-input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or SKU…" />
+            <input className="search-input" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} placeholder="Filter by category…" />
+            <input className="search-input" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)} placeholder="Filter by location…" />
+            <label className="checkbox-label">
+              <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
+              Low stock only
+            </label>
+            <button type="button" className="btn btn-secondary" onClick={load}>Search</button>
+          </div>
+          <div className="data-table-wrap">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>SKU</th>
+                  <th>SKU / Code</th>
                   <th>Category</th>
-                  <th>UoM</th>
-                  <th>Stock</th>
+                  <th>Unit of Measure</th>
+                  <th>On Hand</th>
                   <th>Location</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && (
-                  <tr>
-                    <td colSpan={7}>Loading products...</td>
+                {loading && <tr className="empty-row"><td colSpan={6}>Loading products…</td></tr>}
+                {!loading && products.length === 0 && <tr className="empty-row"><td colSpan={6}>No products found. Click "+ New" to create one.</td></tr>}
+                {!loading && products.map((product) => (
+                  <tr key={product.id} className="clickable" onClick={() => startEdit(product)}>
+                    <td><strong>{product.name}</strong></td>
+                    <td>{product.sku}</td>
+                    <td>{product.category}</td>
+                    <td>{product.unit_of_measure}</td>
+                    <td>{safeNumber(product.availableStock)}</td>
+                    <td>{product.locationName ?? '—'}</td>
                   </tr>
-                )}
-                {!loading && products.length === 0 && (
-                  <tr>
-                    <td colSpan={7}>No products found.</td>
-                  </tr>
-                )}
-                {!loading &&
-                  products.map((product) => (
-                    <tr key={product.id}>
-                      <td>{product.name}</td>
-                      <td>{product.sku}</td>
-                      <td>{product.category}</td>
-                      <td>{product.unit_of_measure}</td>
-                      <td>{safeNumber(product.availableStock)}</td>
-                      <td>{product.locationName ?? '-'}</td>
-                      <td>
-                        <button type="button" className="ghost-btn" onClick={() => startEdit(product)}>
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                ))}
               </tbody>
             </table>
           </div>
         </div>
-      </div>
+      )}
+
+      {viewMode === 'form' && (
+        <form onSubmit={submit}>
+          <div className="control-bar">
+            <div className="control-bar-left">
+              <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+              <button type="button" className="btn btn-secondary" onClick={() => { resetForm(); setViewMode('list') }}>Discard</button>
+            </div>
+          </div>
+          <div className="form-sheet">
+            <div className="form-title-area">
+              <div className="form-doc-subtitle">{editingProductId ? 'Edit Product' : 'New Product'}</div>
+              <input
+                className="form-doc-title"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                placeholder="e.g. Steel Rods"
+              />
+            </div>
+            <div className="field-row">
+              <div className="field-group">
+                <label className="field-label">Internal Reference (SKU)</label>
+                <input className="form-input" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="e.g. SKU-001" required />
+              </div>
+              <div className="field-group">
+                <label className="field-label">Unit of Measure</label>
+                <input className="form-input" value={uom} onChange={(e) => setUom(e.target.value)} placeholder="e.g. Units, Kg, L" required />
+              </div>
+              <div className="field-group">
+                <label className="field-label">Category</label>
+                <input className="form-input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Electronics" required />
+              </div>
+              <div className="field-group">
+                <label className="field-label">Reorder Minimum</label>
+                <input className="form-input" type="number" min={0} value={reorderMinimum} onChange={(e) => setReorderMinimum(e.target.value)} />
+              </div>
+              {!editingProductId && (
+                <div className="field-group">
+                  <label className="field-label">Initial Stock</label>
+                  <input className="form-input" type="number" min={0} value={initialStock} onChange={(e) => setInitialStock(e.target.value)} />
+                </div>
+              )}
+            </div>
+          </div>
+        </form>
+      )}
     </section>
   )
 }
@@ -964,6 +923,7 @@ function OperationsPage({
   const location = useLocation()
   const operationType = toOperationKind(location.pathname)
 
+  const [viewMode, setViewMode] = useState<'list' | 'form'>('list')
   const [operations, setOperations] = useState<Operation[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
@@ -1070,6 +1030,7 @@ function OperationsPage({
       setSourceLocation('')
       setDestinationLocation('')
       fetchData()
+      setViewMode('list')
     } catch (error) {
       pushToast('error', (error as Error).message)
     } finally {
@@ -1092,107 +1053,21 @@ function OperationsPage({
     })
   }
 
+  const opLabel = operationType === 'Receipt' ? 'Receipts'
+    : operationType === 'Delivery' ? 'Delivery Orders'
+    : operationType === 'Internal' ? 'Internal Transfers'
+    : 'Inventory Adjustments'
+
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>{operationType} Operations</h2>
-      </div>
-
-      <div className="split-grid">
-        <form className="form-grid card" onSubmit={submit}>
-          <h3>New {operationType}</h3>
-
-          {operationType === 'Receipt' && (
-            <label>
-              Supplier
-              <input value={supplier} onChange={(e) => setSupplier(e.target.value)} required />
-            </label>
-          )}
-
-          {requiresSource && (
-            <label>
-              Source Location
-              <input value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)} required />
-            </label>
-          )}
-
-          {requiresDestination && (
-            <label>
-              Destination Location
-              <input
-                value={destinationLocation}
-                onChange={(e) => setDestinationLocation(e.target.value)}
-                required
-              />
-            </label>
-          )}
-
-          {requiresAdjustmentLocation && (
-            <label>
-              Location
-              <input
-                value={destinationLocation}
-                onChange={(e) => setDestinationLocation(e.target.value)}
-                required
-              />
-            </label>
-          )}
-
-          {lines.map((line, index) => (
-            <div key={index} className="op-line-row">
-              <p className="line-title">Line {index + 1}</p>
-              <label>
-                Product
-                <select
-                  value={line.product_id}
-                  onChange={(e) => updateLine(index, { product_id: e.target.value })}
-                  required
-                >
-                  <option value="">Select product</option>
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.name} ({product.sku})
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                {operationType === 'Adjustment' ? 'Counted Quantity' : 'Quantity'}
-                <input
-                  type="number"
-                  min={0}
-                  value={line.requested_quantity}
-                  onChange={(e) => updateLine(index, { requested_quantity: e.target.value })}
-                  required
-                />
-              </label>
-
-              <button type="button" className="ghost-btn" onClick={() => removeLine(index)}>
-                Remove Line
-              </button>
-            </div>
-          ))}
-
-          <button type="button" className="ghost-btn" onClick={addLine}>
-            Add Product Line
-          </button>
-
-          {overRequested && (
-            <p className="warning-text">
-              One or more lines exceed known available stock.
-            </p>
-          )}
-
-          <button className="primary-btn" type="submit" disabled={saving}>
-            {saving ? 'Validating...' : `Validate ${operationType}`}
-          </button>
-        </form>
-
-        <div className="card">
-          <h3>{operationType} Documents</h3>
-          <div className="table-wrap">
-            <table>
+    <section>
+      {viewMode === 'list' && (
+        <div className="list-card">
+          <div className="list-header">
+            <h2>{opLabel}</h2>
+            <button type="button" className="btn btn-primary" onClick={() => setViewMode('form')}>+ New</button>
+          </div>
+          <div className="data-table-wrap">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Reference</th>
@@ -1203,31 +1078,122 @@ function OperationsPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && (
-                  <tr>
-                    <td colSpan={5}>Loading documents...</td>
+                {loading && <tr className="empty-row"><td colSpan={5}>Loading documents…</td></tr>}
+                {!loading && operations.length === 0 && <tr className="empty-row"><td colSpan={5}>No documents yet. Click "+ New" to create one.</td></tr>}
+                {!loading && operations.map((op) => (
+                  <tr key={op.id}>
+                    <td><strong>{op.reference_number}</strong></td>
+                    <td>
+                      <span className={`badge badge-${op.status.toLowerCase()}`}>{op.status}</span>
+                    </td>
+                    <td>{op.source_location_name ?? '—'}</td>
+                    <td>{op.destination_location_name ?? '—'}</td>
+                    <td>{formatDate(op.created_at)}</td>
                   </tr>
-                )}
-                {!loading && operations.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>No operation documents yet.</td>
-                  </tr>
-                )}
-                {!loading &&
-                  operations.map((operation) => (
-                    <tr key={operation.id}>
-                      <td>{operation.reference_number}</td>
-                      <td>{operation.status}</td>
-                      <td>{operation.source_location_name ?? '-'}</td>
-                      <td>{operation.destination_location_name ?? '-'}</td>
-                      <td>{formatDate(operation.created_at)}</td>
-                    </tr>
-                  ))}
+                ))}
               </tbody>
             </table>
           </div>
         </div>
-      </div>
+      )}
+
+      {viewMode === 'form' && (
+        <form onSubmit={submit}>
+          <div className="control-bar">
+            <div className="control-bar-left">
+              <button className="btn btn-success" type="submit" disabled={saving}>{saving ? 'Validating…' : 'Validate'}</button>
+              <button type="button" className="btn btn-secondary" onClick={() => {
+                setLines([{ product_id: '', requested_quantity: '0' }])
+                setSupplier('')
+                setSourceLocation('')
+                setDestinationLocation('')
+                setViewMode('list')
+              }}>Discard</button>
+            </div>
+            <div className="control-bar-right">
+              <div className="status-pipeline">
+                <span className="status-step active">Draft</span>
+                <span className="status-step">Done</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="form-sheet">
+            <div className="form-title-area">
+              <div className="form-doc-subtitle">{opLabel}</div>
+              <h2 style={{fontSize:'22px',fontWeight:700,color:'var(--text)',marginTop:'4px'}}>New {operationType === 'Internal' ? 'Internal Transfer' : operationType}</h2>
+            </div>
+
+            <div className="field-row">
+              {operationType === 'Receipt' && (
+                <div className="field-group">
+                  <label className="field-label">Receive From (Supplier)</label>
+                  <input className="form-input" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Supplier name or vendor" required />
+                </div>
+              )}
+              {requiresSource && (
+                <div className="field-group">
+                  <label className="field-label">Source Location</label>
+                  <input className="form-input" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)} placeholder="e.g. Main Warehouse" required />
+                </div>
+              )}
+              {requiresDestination && (
+                <div className="field-group">
+                  <label className="field-label">Destination Location</label>
+                  <input className="form-input" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} placeholder="e.g. Production Floor" required />
+                </div>
+              )}
+              {requiresAdjustmentLocation && (
+                <div className="field-group">
+                  <label className="field-label">Inventory Location</label>
+                  <input className="form-input" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} placeholder="e.g. Main Warehouse" required />
+                </div>
+              )}
+            </div>
+
+            <div className="notebook">
+              <div className="notebook-tabs">
+                <button type="button" className="notebook-tab active">Operations</button>
+              </div>
+              <div className="notebook-content">
+                <table className="lines-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th style={{width:'160px'}}>{operationType === 'Adjustment' ? 'Counted Qty' : 'Demand'}</th>
+                      <th style={{width:'40px'}}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((line, index) => (
+                      <tr key={index}>
+                        <td>
+                          <select className="form-select" value={line.product_id} onChange={(e) => updateLine(index, { product_id: e.target.value })} required>
+                            <option value="">Select a product…</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input className="form-input" type="number" min={0} value={line.requested_quantity} onChange={(e) => updateLine(index, { requested_quantity: e.target.value })} required />
+                        </td>
+                        <td>
+                          <button type="button" className="btn-icon" onClick={() => removeLine(index)} title="Remove">✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button type="button" className="add-line-btn" onClick={addLine}>+ Add a line</button>
+                {overRequested && (
+                  <p className="warning-text" style={{marginTop:'12px'}}>⚠️ One or more quantities exceed available stock.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </form>
+      )}
     </section>
   )
 }
@@ -1258,16 +1224,16 @@ function MoveHistoryPage({
   }, [token, pushToast])
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Move History / Stock Ledger</h2>
-      </div>
-      <div className="card">
-        <div className="table-wrap">
-          <table>
+    <section>
+      <div className="list-card">
+        <div className="list-header">
+          <h2>Move History / Stock Ledger</h2>
+        </div>
+        <div className="data-table-wrap">
+          <table className="data-table">
             <thead>
               <tr>
-                <th>Date</th>
+                <th>Date &amp; Time</th>
                 <th>Product</th>
                 <th>From</th>
                 <th>To</th>
@@ -1276,27 +1242,18 @@ function MoveHistoryPage({
               </tr>
             </thead>
             <tbody>
-              {loading && (
-                <tr>
-                  <td colSpan={6}>Loading ledger...</td>
+              {loading && <tr className="empty-row"><td colSpan={6}>Loading ledger…</td></tr>}
+              {!loading && entries.length === 0 && <tr className="empty-row"><td colSpan={6}>No stock movements have been recorded yet.</td></tr>}
+              {!loading && entries.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{formatDate(entry.timestamp)}</td>
+                  <td><strong>{entry.product_name}</strong></td>
+                  <td>{entry.from_location_name ?? '—'}</td>
+                  <td>{entry.to_location_name ?? '—'}</td>
+                  <td>{entry.quantity}</td>
+                  <td>{entry.reference_number ?? '—'}</td>
                 </tr>
-              )}
-              {!loading && entries.length === 0 && (
-                <tr>
-                  <td colSpan={6}>No ledger entries found.</td>
-                </tr>
-              )}
-              {!loading &&
-                entries.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>{formatDate(entry.timestamp)}</td>
-                    <td>{entry.product_name}</td>
-                    <td>{entry.from_location_name ?? '-'}</td>
-                    <td>{entry.to_location_name ?? '-'}</td>
-                    <td>{entry.quantity}</td>
-                    <td>{entry.reference_number ?? '-'}</td>
-                  </tr>
-                ))}
+              ))}
             </tbody>
           </table>
         </div>
@@ -1355,35 +1312,35 @@ function WarehousesPage({
   }
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Warehouse Settings</h2>
-      </div>
+    <section>
+      <div className="split-layout">
+        <div className="panel-card">
+          <div className="panel-card-header">Add Warehouse / Location</div>
+          <div className="panel-card-body">
+            <form onSubmit={submit}>
+              <div className="form-field">
+                <label className="form-field-label">Location Name</label>
+                <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main Warehouse" required />
+              </div>
+              <div className="form-field">
+                <label className="form-field-label">Location Type</label>
+                <select className="form-select" value={type} onChange={(e) => setType(e.target.value)}>
+                  <option value="Internal">Internal Location</option>
+                  <option value="Vendor">Vendor Location</option>
+                  <option value="Customer">Customer Location</option>
+                </select>
+              </div>
+              <button className="btn btn-primary" type="submit">Save Location</button>
+            </form>
+          </div>
+        </div>
 
-      <div className="split-grid">
-        <form className="form-grid card" onSubmit={submit}>
-          <h3>Add Warehouse / Location</h3>
-          <label>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} required />
-          </label>
-          <label>
-            Type
-            <select value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="Internal">Internal Location</option>
-              <option value="Vendor">Vendor Location</option>
-              <option value="Customer">Customer Location</option>
-            </select>
-          </label>
-          <button className="primary-btn" type="submit">
-            Save Warehouse
-          </button>
-        </form>
-
-        <div className="card">
-          <h3>Registered Warehouses</h3>
-          <div className="table-wrap">
-            <table>
+        <div className="list-card">
+          <div className="list-header">
+            <h2>Registered Locations</h2>
+          </div>
+          <div className="data-table-wrap">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -1391,23 +1348,14 @@ function WarehousesPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && (
-                  <tr>
-                    <td colSpan={2}>Loading locations...</td>
+                {loading && <tr className="empty-row"><td colSpan={2}>Loading…</td></tr>}
+                {!loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={2}>No locations configured yet.</td></tr>}
+                {!loading && warehouses.map((wh) => (
+                  <tr key={wh.id}>
+                    <td><strong>{wh.name}</strong></td>
+                    <td><span className="badge badge-draft">{wh.type}</span></td>
                   </tr>
-                )}
-                {!loading && warehouses.length === 0 && (
-                  <tr>
-                    <td colSpan={2}>No locations configured.</td>
-                  </tr>
-                )}
-                {!loading &&
-                  warehouses.map((wh) => (
-                    <tr key={wh.id}>
-                      <td>{wh.name}</td>
-                      <td>{wh.type}</td>
-                    </tr>
-                  ))}
+                ))}
               </tbody>
             </table>
           </div>
@@ -1443,33 +1391,33 @@ function ProfilePage({
   }, [token, pushToast])
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>My Profile</h2>
-      </div>
-      <div className="card">
-        {loading && <p>Loading profile...</p>}
-        {!loading && !profile && <p>Unable to load profile.</p>}
-        {!loading && profile && (
-          <dl className="profile-grid">
-            <div>
-              <dt>Name</dt>
-              <dd>{profile.name}</dd>
+    <section>
+      <div className="panel-card" style={{maxWidth:'600px'}}>
+        <div className="panel-card-header">My Profile</div>
+        <div className="panel-card-body">
+          {loading && <p className="muted">Loading profile…</p>}
+          {!loading && !profile && <p className="muted">Unable to load profile. Please try again.</p>}
+          {!loading && profile && (
+            <div className="info-grid">
+              <dl className="info-item">
+                <dt>Full Name</dt>
+                <dd>{profile.name}</dd>
+              </dl>
+              <dl className="info-item">
+                <dt>Email Address</dt>
+                <dd>{profile.email}</dd>
+              </dl>
+              <dl className="info-item">
+                <dt>Role</dt>
+                <dd>{profile.role}</dd>
+              </dl>
+              <dl className="info-item">
+                <dt>User ID</dt>
+                <dd>#{profile.id}</dd>
+              </dl>
             </div>
-            <div>
-              <dt>Email</dt>
-              <dd>{profile.email}</dd>
-            </div>
-            <div>
-              <dt>Role</dt>
-              <dd>{profile.role}</dd>
-            </div>
-            <div>
-              <dt>User ID</dt>
-              <dd>{profile.id}</dd>
-            </div>
-          </dl>
-        )}
+          )}
+        </div>
       </div>
     </section>
   )

@@ -25,16 +25,6 @@ async function requireAuth(req, res, next) {
       return res.status(401).json({ message: 'Missing bearer token' })
     }
 
-    if (token === 'dev-token') {
-      const db = await getDb()
-      const demo = await db.get('SELECT id, name, email, role FROM Users ORDER BY id LIMIT 1')
-      if (!demo) {
-        return res.status(401).json({ message: 'No user available for dev token' })
-      }
-      req.user = demo
-      return next()
-    }
-
     const payload = jwt.verify(token, JWT_SECRET)
     const db = await getDb()
     const user = await db.get('SELECT id, name, email, role FROM Users WHERE id = ?', payload.sub)
