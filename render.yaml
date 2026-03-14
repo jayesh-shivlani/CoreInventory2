@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: coreinventory
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend
+    startCommand: npm run start --prefix backend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DB_PATH
+        value: /var/data/coreinventory.db
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: FRONTEND_DIST_PATH
+        value: ../frontend/dist
+    disk:
+      name: coreinventory-data
+      mountPath: /var/data
+      sizeGB: 1

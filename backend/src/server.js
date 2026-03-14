@@ -2,13 +2,15 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
+const fs = require('fs')
+const path = require('path')
 const { buildReference, ensureLocationByName, getDb, initDb } = require('./db')
 const { requireAuth, signToken } = require('./auth')
 
 const app = express()
 const PORT = Number(process.env.PORT || 4000)
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || '')
   .split(',')
   .map((x) => x.trim())
   .filter(Boolean)
@@ -16,7 +18,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes(origin)) {
         callback(null, true)
       } else {
         callback(new Error('CORS blocked'))
@@ -821,6 +823,21 @@ app.get('/api/ledger', requireAuth, async (req, res) => {
 
   res.json(rows)
 })
+
+const frontendDistPath = process.env.FRONTEND_DIST_PATH
+  ? path.resolve(process.cwd(), process.env.FRONTEND_DIST_PATH)
+  : path.resolve(__dirname, '../../frontend/dist')
+
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath))
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      return next()
+    }
+    return res.sendFile(path.join(frontendDistPath, 'index.html'))
+  })
+}
 
 app.use((error, req, res, next) => {
   if (error && error.message === 'CORS blocked') {
