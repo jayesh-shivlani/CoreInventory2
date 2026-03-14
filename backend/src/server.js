@@ -19,7 +19,8 @@ async function sendOtpEmail(toEmail, otp) {
   const from = process.env.FROM_EMAIL || user
 
   if (!host || !user || !pass || !from) {
-    throw new Error('Email service is not configured')
+    console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} is ${otp}`)
+    return
   }
 
   const transporter = nodemailer.createTransport({
