@@ -28,22 +28,38 @@ async function main() {
 
     await pool.query(`ALTER TABLE public.${t} ENABLE ROW LEVEL SECURITY`)
 
-    const policyName = `${t}_authenticated_all`
-    const policyExists = await pool.query(
+    const legacyPolicy = `${t}_authenticated_all`
+    const legacyPolicyExists = await pool.query(
       `SELECT 1
        FROM pg_policies
        WHERE schemaname = $1
          AND tablename = $2
          AND policyname = $3
        LIMIT 1`,
-      ['public', t, policyName],
+      ['public', t, legacyPolicy],
     )
 
-    if (policyExists.rowCount === 0) {
+    if (legacyPolicyExists.rowCount > 0) {
+      await pool.query(`DROP POLICY ${legacyPolicy} ON public.${t}`)
+      console.log(`${t}: dropped legacy permissive policy`)
+    }
+
+    const selectPolicy = `${t}_authenticated_select`
+    const selectPolicyExists = await pool.query(
+      `SELECT 1
+       FROM pg_policies
+       WHERE schemaname = $1
+         AND tablename = $2
+         AND policyname = $3
+       LIMIT 1`,
+      ['public', t, selectPolicy],
+    )
+
+    if (selectPolicyExists.rowCount === 0) {
       await pool.query(
-        `CREATE POLICY ${policyName} ON public.${t} FOR ALL TO authenticated USING (true) WITH CHECK (true)`,
+        `CREATE POLICY ${selectPolicy} ON public.${t} FOR SELECT TO authenticated USING (true)`,
       )
-      console.log(`${t}: policy created`)
+      console.log(`${t}: select policy created`)
     }
 
     const r = await pool.query(

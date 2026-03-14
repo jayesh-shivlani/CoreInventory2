@@ -170,7 +170,7 @@ async function initDb() {
   `)
 
   // Supabase security hardening: enable RLS on tables exposed via public schema.
-  // Policies are created idempotently to allow authenticated access while blocking anon.
+  // Keep authenticated read access while avoiding permissive write policies.
   await db.exec(`
     ALTER TABLE IF EXISTS public.products ENABLE ROW LEVEL SECURITY;
     ALTER TABLE IF EXISTS public.stock_quants ENABLE ROW LEVEL SECURITY;
@@ -199,16 +199,26 @@ async function initDb() {
     BEGIN
       FOREACH t IN ARRAY table_names LOOP
         IF to_regclass('public.' || t) IS NOT NULL THEN
-          IF NOT EXISTS (
+          IF EXISTS (
             SELECT 1
             FROM pg_policies
             WHERE schemaname = 'public'
               AND tablename = t
               AND policyname = t || '_authenticated_all'
           ) THEN
+            EXECUTE format('DROP POLICY %I ON public.%I', t || '_authenticated_all', t);
+          END IF;
+
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_policies
+            WHERE schemaname = 'public'
+              AND tablename = t
+              AND policyname = t || '_authenticated_select'
+          ) THEN
             EXECUTE format(
-              'CREATE POLICY %I ON public.%I FOR ALL TO authenticated USING (true) WITH CHECK (true)',
-              t || '_authenticated_all',
+              'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (true)',
+              t || '_authenticated_select',
               t
             );
           END IF;
