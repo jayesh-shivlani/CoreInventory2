@@ -112,6 +112,7 @@ npm run dev:frontend
 - `npm run dev:backend` : run backend only
 - `npm run dev:frontend` : run frontend only
 - `npm run install:all` : install backend and frontend dependencies
+- `npm run test:smoke:api` : run automated backend API smoke tests
 
 ## API Highlights
 
