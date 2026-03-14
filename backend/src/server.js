@@ -78,10 +78,20 @@ const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORI
   .map((x) => x.trim())
   .filter(Boolean)
 
+function isLocalDevOrigin(origin) {
+  try {
+    const url = new URL(origin)
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+  } catch {
+    return false
+  }
+}
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes(origin)) {
+      const isDevLocalOrigin = process.env.NODE_ENV !== 'production' && origin && isLocalDevOrigin(origin)
+      if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes(origin) || isDevLocalOrigin) {
         callback(null, true)
       } else {
         callback(new Error('CORS blocked'))
@@ -99,7 +109,7 @@ app.get('/api/health', async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, email, password, role, otp } = req.body || {}
+    const { name, email, password, role } = req.body || {}
     const normalizedEmail = String(email || '').toLowerCase().trim()
 
     if (!normalizedEmail) {
@@ -124,78 +134,23 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(409).json({ message: 'Email already registered' })
     }
 
-    if (!otp) {
-      if (!name || !password) {
-        return res.status(400).json({ message: 'name, email, and password are required' })
-      }
-
-      if (String(password).length < 6) {
-        return res.status(400).json({ message: 'Password must be at least 6 characters' })
-      }
-
-      const hash = await bcrypt.hash(String(password), 10)
-      const generatedOtp = String(Math.floor(100000 + Math.random() * 900000))
-
-      await db.run(
-        `
-          INSERT INTO Signup_Verifications (email, name, password_hash, role, otp_code, otp_expires_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(email) DO UPDATE SET
-            name = excluded.name,
-            password_hash = excluded.password_hash,
-            role = excluded.role,
-            otp_code = excluded.otp_code,
-            otp_expires_at = excluded.otp_expires_at
-        `,
-        normalizedEmail,
-        String(name).trim(),
-        hash,
-        role && typeof role === 'string' ? role : 'Warehouse Staff',
-        generatedOtp,
-        getOtpExpiryIso(),
-      )
-
-      try {
-        const delivery = await sendOtpEmail(normalizedEmail, generatedOtp, 'account sign up')
-        if (!delivery.delivered && EXPOSE_DEV_OTP) {
-          return res.status(202).json({
-            message: 'Signup OTP generated in development mode',
-            dev_otp: generatedOtp,
-          })
-        }
-      } catch (error) {
-        return res.status(500).json({ message: 'Failed to send signup OTP email. Please contact support.' })
-      }
-
-      return res.status(202).json({ message: 'Signup OTP sent to your email' })
+    if (!name || !password) {
+      return res.status(400).json({ message: 'name, email, and password are required' })
     }
 
-    const pending = await db.get(
-      'SELECT email, name, password_hash, role, otp_code, otp_expires_at FROM Signup_Verifications WHERE email = ?',
-      normalizedEmail,
-    )
-
-    if (!pending) {
-      return res.status(400).json({ message: 'No pending sign up found for this email. Request a new OTP.' })
+    if (String(password).length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters' })
     }
 
-    if (String(otp).trim() !== String(pending.otp_code || '').trim()) {
-      return res.status(400).json({ message: 'Invalid signup OTP code' })
-    }
-
-    if (pending.otp_expires_at && new Date(pending.otp_expires_at).getTime() < Date.now()) {
-      return res.status(400).json({ message: 'Signup OTP has expired. Request a new OTP.' })
-    }
+    const hash = await bcrypt.hash(String(password), 10)
 
     await db.run(
       'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
-      pending.name,
-      pending.email,
-      pending.password_hash,
-      pending.role,
+      String(name).trim(),
+      normalizedEmail,
+      hash,
+      role && typeof role === 'string' ? role : 'Warehouse Staff',
     )
-
-    await db.run('DELETE FROM Signup_Verifications WHERE email = ?', normalizedEmail)
 
     return res.status(201).json({ message: 'Registered successfully' })
   } catch (error) {

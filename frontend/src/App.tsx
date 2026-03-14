@@ -345,9 +345,6 @@ function AuthPage({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
-  const [signupOtp, setSignupOtp] = useState('')
-  const [signupVerificationPending, setSignupVerificationPending] = useState(false)
-  const [signupPendingEmail, setSignupPendingEmail] = useState('')
   const [showReset, setShowReset] = useState(false)
   const [resetStep, setResetStep] = useState<'request' | 'verify'>('request')
   const [resetBusy, setResetBusy] = useState(false)
@@ -465,32 +462,9 @@ function AuthPage({
       }
 
       if (mode === 'signup') {
-        if (!signupVerificationPending) {
-          const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/register', 'POST', undefined, { name, email, password })
-          setSignupVerificationPending(true)
-          setSignupPendingEmail(email.trim().toLowerCase())
-          if (response?.dev_otp) {
-            setSignupOtp(response.dev_otp)
-            pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
-          } else {
-            pushToast('info', 'Signup OTP sent. Enter the OTP to complete account creation.')
-          }
-        } else {
-          if (!signupOtp.trim()) {
-            pushToast('error', 'Signup OTP is required')
-            return
-          }
-
-          await apiRequest('/auth/register', 'POST', undefined, {
-            email,
-            otp: signupOtp.trim(),
-          })
-          setSignupOtp('')
-          setSignupVerificationPending(false)
-          setSignupPendingEmail('')
-          pushToast('success', 'Account created, please log in')
-          setMode('login')
-        }
+        await apiRequest('/auth/register', 'POST', undefined, { name, email, password })
+        pushToast('success', 'Account created, please log in')
+        setMode('login')
       }
 
     } catch (error) {
@@ -514,7 +488,7 @@ function AuthPage({
         </div>
 
         <div className="auth-tabs">
-          <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null); setSignupOtp(''); setSignupVerificationPending(false); setSignupPendingEmail('') }}>Sign In</button>
+          <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null) }}>Sign In</button>
           <button type="button" className={`auth-tab${mode === 'signup' ? ' active' : ''}`} onClick={() => { setMode('signup'); setAuthError(null) }}>Create Account</button>
         </div>
 
@@ -527,27 +501,15 @@ function AuthPage({
           )}
           <div className="form-field">
             <label className="form-field-label">Email Address</label>
-            <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required disabled={mode === 'signup' && signupVerificationPending} />
+            <input className="form-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
           </div>
           <div className="form-field">
             <label className="form-field-label">Password</label>
-            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} disabled={mode === 'signup' && signupVerificationPending} />
+            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
           </div>
 
-          {mode === 'signup' && signupVerificationPending && (
-            <>
-              <div className="form-field">
-                <label className="form-field-label">Signup OTP</label>
-                <input className="form-input" value={signupOtp} onChange={(e) => setSignupOtp(e.target.value)} placeholder="6-digit code" required />
-              </div>
-              <p className="muted" style={{fontSize:'12px', marginTop:'-2px'}}>
-                OTP sent to {signupPendingEmail || email.trim().toLowerCase()}.
-              </p>
-            </>
-          )}
-
           <button type="submit" className="btn btn-primary" style={{width:'100%', padding:'9px 16px', marginTop:'8px'}} disabled={busy}>
-            {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : signupVerificationPending ? 'Verify & Create Account' : 'Send Signup OTP'}
+            {busy ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
           {authError && (
             <div className="auth-error">{authError}</div>
