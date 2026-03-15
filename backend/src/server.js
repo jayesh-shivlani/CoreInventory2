@@ -4,7 +4,6 @@ const cors = require('cors')
 const bcrypt = require('bcryptjs')
 const dns = require('dns').promises
 const { Resend } = require('resend')
-const nodemailer = require('nodemailer')
 const fs = require('fs')
 const path = require('path')
 const { buildReference, ensureLocationByName, getDb, initDb } = require('./db')
@@ -15,6 +14,8 @@ const PORT = Number(process.env.PORT || 4000)
 
 const OTP_TTL_MINUTES = Number(process.env.SIGNUP_OTP_TTL_MINUTES || 10)
 const RESET_OTP_TTL_MINUTES = Number(process.env.RESET_OTP_TTL_MINUTES || 10)
+const RESEND_TIMEOUT_MS = Number(process.env.RESEND_TIMEOUT_MS || 15000)
+const RESEND_MAX_ATTEMPTS = Math.max(1, Number(process.env.RESEND_MAX_ATTEMPTS || 2))
 const STRICT_EMAIL_DOMAIN_CHECK = String(process.env.STRICT_EMAIL_DOMAIN_CHECK || 'false').toLowerCase() === 'true'
 const EXPOSE_DEV_OTP =
   process.env.NODE_ENV !== 'production' &&
@@ -52,146 +53,110 @@ function getOtpExpiryIso() {
   return new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString()
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function withTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`Resend request timed out after ${timeoutMs}ms`)), timeoutMs)
+    }),
+  ])
+}
+
+function isRetryableResendError(error) {
+  const msg = String(error?.message || '').toLowerCase()
+  return (
+    msg.includes('timed out') ||
+    msg.includes('timeout') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('429') ||
+    msg.includes('500') ||
+    msg.includes('502') ||
+    msg.includes('503') ||
+    msg.includes('504') ||
+    msg.includes('econnreset') ||
+    msg.includes('eai_again')
+  )
+}
+
+function toOtpDeliveryMessage(error) {
+  const msg = String(error?.message || '')
+  const lower = msg.toLowerCase()
+
+  if (lower.includes('testing emails to your own email address')) {
+    return 'Resend is in test mode. OTP can be sent only to your own verified email. Verify a domain in Resend to send OTP to all users.'
+  }
+
+  if (lower.includes('domain is not verified')) {
+    return 'Resend sender domain is not verified. Use onboarding@resend.dev or verify your sending domain in Resend.'
+  }
+
+  if (lower.includes('invalid api key') || lower.includes('unauthorized') || lower.includes('401')) {
+    return 'Resend API key is invalid. Update RESEND_API_KEY in deployment settings.'
+  }
+
+  return 'OTP email service is unavailable right now. Please try again.'
+}
+
 async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
-  const smtpHost = process.env.SMTP_HOST
-  const smtpPort = Number(process.env.SMTP_PORT || 465)
-  const smtpUser = process.env.SMTP_USER
-  const smtpPass = process.env.SMTP_PASS
-  const smtpTimeoutMs = Number(process.env.SMTP_TIMEOUT_MS || 12000)
-  const brevoApiKey = process.env.BREVO_API_KEY
-  const from = process.env.FROM_EMAIL || smtpUser || 'onboarding@resend.dev'
+  const from = process.env.FROM_EMAIL || 'onboarding@resend.dev'
+  const resendKey = process.env.RESEND_API_KEY
   const isProduction = process.env.NODE_ENV === 'production'
 
-  let smtpError = null
-  let brevoError = null
-  let resendError = null
-
-  if (smtpHost && smtpUser && smtpPass) {
-    try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        connectionTimeout: smtpTimeoutMs,
-        greetingTimeout: smtpTimeoutMs,
-        socketTimeout: smtpTimeoutMs,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      })
-
-      await transporter.sendMail({
-        from,
-        to: toEmail,
-        subject: `Core Inventory OTP for ${purpose}`,
-        text: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
-        html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
-      })
-
-      return { delivered: true }
-    } catch (error) {
-      console.error('SMTP email sending failed:', error)
-      smtpError = error
-    }
-  }
-
-  if (brevoApiKey) {
-    try {
-      let senderEmail = from
-      let senderName = 'Core Inventory'
-      const senderMatch = String(from).match(/^\s*(.*?)\s*<\s*([^>]+)\s*>\s*$/)
-      if (senderMatch) {
-        senderName = senderMatch[1] || senderName
-        senderEmail = senderMatch[2]
-      }
-
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 15000)
-
-      try {
-        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'api-key': brevoApiKey,
-          },
-          body: JSON.stringify({
-            sender: { email: senderEmail, name: senderName },
-            to: [{ email: toEmail }],
-            subject: `Core Inventory OTP for ${purpose}`,
-            textContent: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
-            htmlContent: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
-          }),
-          signal: controller.signal,
-        })
-
-        if (!response.ok) {
-          const errorBody = await response.text()
-          throw new Error(`Brevo API ${response.status}: ${errorBody}`)
-        }
-
-        return { delivered: true }
-      } finally {
-        clearTimeout(timeout)
-      }
-    } catch (error) {
-      console.error('Brevo API email sending failed:', error)
-      brevoError = error
-    }
-  }
-
-  const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) {
     if (isProduction) {
-      const failureReasons = []
-      if (smtpError) failureReasons.push('SMTP failed')
-      if (brevoError) failureReasons.push('Brevo API failed')
-      const reason = failureReasons.length > 0
-        ? `${failureReasons.join(' and ')} and RESEND_API_KEY is not configured`
-        : 'No email provider configured (missing SMTP config, BREVO_API_KEY, and RESEND_API_KEY)'
-      throw new Error(reason)
+      throw new Error('RESEND_API_KEY is not configured')
     }
     console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
     return { delivered: false }
   }
 
   const resend = new Resend(resendKey)
+  let resendError = null
 
-  try {
-    const response = await resend.emails.send({
-      from: from.includes('@') ? from : `Core Inventory <${from}>`,
-      to: toEmail,
-      subject: `Core Inventory OTP for ${purpose}`,
-      text: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
-      html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
-    })
+  for (let attempt = 1; attempt <= RESEND_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await withTimeout(
+        resend.emails.send({
+          from: from.includes('@') ? from : `Core Inventory <${from}>`,
+          to: toEmail,
+          subject: `Core Inventory OTP for ${purpose}`,
+          text: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
+          html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
+        }),
+        RESEND_TIMEOUT_MS,
+      )
 
-    if (response.error) {
-      console.error('Resend returned an error:', response.error)
-      throw new Error(response.error.message || 'Email sending failed via Resend')
+      if (response?.error) {
+        console.error('Resend returned an error:', response.error)
+        throw new Error(response.error.message || 'Email sending failed via Resend')
+      }
+
+      return { delivered: true }
+    } catch (error) {
+      resendError = error
+      console.error(`Resend email attempt ${attempt}/${RESEND_MAX_ATTEMPTS} failed:`, error)
+
+      const shouldRetry = attempt < RESEND_MAX_ATTEMPTS && isRetryableResendError(error)
+      if (shouldRetry) {
+        await sleep(400 * attempt)
+        continue
+      }
+
+      break
     }
-
-    return { delivered: true }
-  } catch (error) {
-    console.error('Email sending failed:', error)
-    resendError = error
-    if (!isProduction) {
-      console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`)
-      return { delivered: false }
-    }
-
-    const details = []
-    if (smtpError) {
-      details.push(`SMTP failed: ${smtpError.message || String(smtpError)}`)
-    }
-    if (brevoError) {
-      details.push(`Brevo API failed: ${brevoError.message || String(brevoError)}`)
-    }
-    details.push(`Resend failed: ${resendError.message || String(resendError)}`)
-
-    throw new Error(`Email service failed to deliver OTP. ${details.join(' | ')}`)
   }
+
+  if (!isProduction) {
+    console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`)
+    return { delivered: false }
+  }
+
+  throw resendError || new Error('Email service failed to deliver OTP')
 }
 
 const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || '')
@@ -303,7 +268,7 @@ app.post('/api/auth/register', async (req, res) => {
           return res.status(202).json({ message: 'OTP generated in development mode', dev_otp: generatedOtp })
         }
       } catch (error) {
-        return res.status(500).json({ message: 'Failed to send signup OTP email. Please try again.' })
+        return res.status(500).json({ message: toOtpDeliveryMessage(error) })
       }
 
       return res.status(202).json({ message: 'OTP sent to your email' })
@@ -419,7 +384,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
           return res.json({ message: 'OTP generated in development mode', dev_otp: generatedOtp })
         }
       } catch (error) {
-        return res.status(500).json({ message: 'Failed to send OTP email. Please contact support.' })
+        return res.status(500).json({ message: toOtpDeliveryMessage(error) })
       }
 
       return res.json({ message: 'OTP sent to your email' })
