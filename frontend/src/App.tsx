@@ -426,6 +426,10 @@ function isPendingRoleRequestStatus(status: string | undefined | null): boolean 
   return normalized === 'AWAITING_ADMIN_APPROVAL' || normalized === 'PENDING' || normalized === 'PENDING_ADMIN_APPROVAL'
 }
 
+function isStrongPassword(password: string): boolean {
+  return /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(String(password || ''))
+}
+
 function AuthPage({
   token,
   onLogin,
@@ -441,6 +445,7 @@ function AuthPage({
   const [authError, setAuthError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [name, setName] = useState('')
   const [requestedRole, setRequestedRole] = useState<'Warehouse Staff' | 'Manager'>('Warehouse Staff')
   const [signupStep, setSignupStep] = useState<'request' | 'verify'>('request')
@@ -518,8 +523,8 @@ function AuthPage({
       pushToast('error', 'OTP is required')
       return
     }
-    if (resetNewPassword.length < 6) {
-      pushToast('error', 'New password must be at least 6 characters')
+    if (!isStrongPassword(resetNewPassword)) {
+      pushToast('error', 'Use a stronger password: at least 8 characters with letters and numbers')
       return
     }
 
@@ -552,12 +557,20 @@ function AuthPage({
       pushToast('error', 'Email is required')
       return
     }
-    if (password.length < 6) {
+    if (mode === 'login' && password.length < 6) {
       pushToast('error', 'Password must be at least 6 characters')
       return
     }
     if (mode === 'signup' && !name.trim()) {
       pushToast('error', 'Name is required for sign up')
+      return
+    }
+    if (mode === 'signup' && !isStrongPassword(password)) {
+      pushToast('error', 'Use a stronger password: at least 8 characters with letters and numbers')
+      return
+    }
+    if (mode === 'signup' && password !== confirmPassword) {
+      pushToast('error', 'Password and confirm password do not match')
       return
     }
 
@@ -611,6 +624,7 @@ function AuthPage({
           setSignupOtpSentTo('')
           setSignupResendCooldown(0)
           setRequestedRole('Warehouse Staff')
+          setConfirmPassword('')
           setMode('login')
         }
       }
@@ -645,6 +659,17 @@ function AuthPage({
         </aside>
 
         <div className="auth-card">
+          <div className="auth-card-head">
+            <h3>{mode === 'login' ? 'Welcome Back' : 'Create Your Account'}</h3>
+            <p>
+              {mode === 'login'
+                ? 'Sign in to continue managing inventory operations.'
+                : signupStep === 'request'
+                  ? 'Request an OTP to verify your email and submit your role request.'
+                  : 'Enter the OTP to verify your email and finish account setup.'}
+            </p>
+          </div>
+
           <div className="auth-tabs">
             <button type="button" className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setAuthError(null) }}>Sign In</button>
             <button
@@ -658,11 +683,16 @@ function AuthPage({
                 setSignupOtpSentTo('')
                 setSignupResendCooldown(0)
                 setRequestedRole('Warehouse Staff')
+                setConfirmPassword('')
               }}
             >
               Create Account
             </button>
           </div>
+
+          {mode === 'signup' && (
+            <div className="auth-step-chip">{signupStep === 'request' ? 'Step 1 of 2: Request OTP' : 'Step 2 of 2: Verify OTP'}</div>
+          )}
 
           <form onSubmit={submit}>
             {mode === 'signup' && (
@@ -686,8 +716,16 @@ function AuthPage({
             </div>
             <div className="form-field">
               <label className="form-field-label">Password</label>
-              <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
+              <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={mode === 'signup' ? 8 : 6} />
             </div>
+
+            {mode === 'signup' && (
+              <div className="form-field">
+                <label className="form-field-label">Confirm Password</label>
+                <input className="form-input" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter password" required minLength={8} />
+                <p className="password-help">Use at least 8 characters and include both letters and numbers.</p>
+              </div>
+            )}
 
             {mode === 'signup' && signupStep === 'verify' && (
               <>
@@ -704,8 +742,8 @@ function AuthPage({
                     className="btn btn-secondary"
                     disabled={busy || signupResendCooldown > 0}
                     onClick={async () => {
-                      if (!name.trim() || !email.trim() || password.length < 6) {
-                        pushToast('error', 'Enter valid name, email, and password first')
+                      if (!name.trim() || !email.trim() || !isStrongPassword(password) || password !== confirmPassword) {
+                        pushToast('error', 'Enter valid details, use a strong password, and confirm password correctly')
                         return
                       }
 
@@ -776,7 +814,8 @@ function AuthPage({
                     </div>
                     <div className="form-field">
                       <label className="form-field-label">New Password</label>
-                      <input className="form-input" type="password" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} minLength={6} required />
+                      <input className="form-input" type="password" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} minLength={8} required />
+                      <p className="password-help">Use at least 8 characters and include both letters and numbers.</p>
                     </div>
                   </>
                 )}

@@ -32,6 +32,10 @@ function isValidEmailFormat(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
 }
 
+function isStrongPassword(password) {
+  return /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(String(password || ''))
+}
+
 async function hasMxRecord(email) {
   try {
     const normalized = String(email || '').trim().toLowerCase()
@@ -182,8 +186,8 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ message: 'name, email, and password are required' })
     }
 
-    if (String(password).length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters' })
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters and include letters and numbers' })
     }
 
     const normalizedName = String(name).trim()
@@ -348,8 +352,8 @@ app.post('/api/auth/reset-password', async (req, res) => {
       return res.json({ message: 'OTP sent to your email' })
     }
 
-    if (String(newPassword).length < 6) {
-      return res.status(400).json({ message: 'newPassword must be at least 6 characters' })
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({ message: 'newPassword must be at least 8 characters and include letters and numbers' })
     }
 
     if (String(otp).trim() !== String(user.otp_code || '').trim()) {
