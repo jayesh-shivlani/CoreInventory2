@@ -357,6 +357,17 @@ a { text-decoration: none; color: inherit; }
   background: rgba(220,53,69,0.06);
 }
 
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #b02a37;
+  border-color: #b02a37;
+}
+
 .btn-sm {
   padding: 4px 10px;
   font-size: 12px;

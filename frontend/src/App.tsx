@@ -2448,6 +2448,7 @@ function ProfilePage({
   const [managedUsers, setManagedUsers] = useState<AdminManagedUser[]>([])
   const [managedUsersLoading, setManagedUsersLoading] = useState(false)
   const [revokeBusyId, setRevokeBusyId] = useState<number | null>(null)
+  const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null)
   const [auditLog, setAuditLog] = useState<RoleAuditEntry[]>([])
   const [auditLogLoading, setAuditLogLoading] = useState(false)
 
@@ -2491,7 +2492,7 @@ function ProfilePage({
 
     setManagedUsersLoading(true)
     try {
-      const data = await apiRequest<AdminManagedUser[]>('/admin/users', 'GET', token)
+      const data = await apiRequest<AdminManagedUser[]>('/admin/users?scope=all', 'GET', token)
       setManagedUsers(Array.isArray(data) ? data : [])
     } catch (error) {
       if (isAdminRole(profile?.role)) {
@@ -2534,6 +2535,25 @@ function ProfilePage({
       pushToast('error', (error as Error).message)
     } finally {
       setRevokeBusyId(null)
+    }
+  }
+
+  const deleteUser = async (user: AdminManagedUser) => {
+    if (user.id === profile?.id) {
+      pushToast('error', 'You cannot delete your own account.')
+      return
+    }
+    const ok = window.confirm(`Permanently delete ${user.name} (${user.email})? This cannot be undone.`)
+    if (!ok) return
+    setDeleteBusyId(user.id)
+    try {
+      await apiRequest(`/admin/users/${user.id}`, 'DELETE', token ?? undefined)
+      pushToast('success', `${user.name} has been deleted`)
+      await Promise.all([loadManagedUsers(), loadAuditLog()])
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setDeleteBusyId(null)
     }
   }
 
@@ -2747,7 +2767,7 @@ function ProfilePage({
           <div className="list-card">
             <div className="list-header">
               <h2>Role Access Management</h2>
-              <p className="muted">Revoke elevated access and set users back to Warehouse Staff.</p>
+              <p className="muted">Manage user roles and accounts. Revoke elevated access or delete users entirely.</p>
             </div>
             <div className="data-table-wrap">
               <table className="data-table">
@@ -2756,20 +2776,35 @@ function ProfilePage({
                     <th>Name</th>
                     <th>Email</th>
                     <th>Current Role</th>
-                    <th>Action</th>
+                    <th>Revoke Role</th>
+                    <th>Delete User</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {managedUsersLoading && <tr className="empty-row"><td colSpan={4}>Loading users…</td></tr>}
-                  {!managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={4}>No elevated users found.</td></tr>}
+                  {managedUsersLoading && <tr className="empty-row"><td colSpan={5}>Loading users…</td></tr>}
+                  {!managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={5}>No users found.</td></tr>}
                   {!managedUsersLoading && managedUsers.map((user) => (
                     <tr key={user.id}>
                       <td><strong>{user.name}</strong></td>
                       <td>{user.email}</td>
                       <td>
-                        <span className={`badge ${String(user.role).toLowerCase() === 'admin' ? 'badge-ready' : 'badge-done'}`}>
+                        <span className={`badge ${String(user.role).toLowerCase() === 'admin' ? 'badge-ready' : String(user.role).toLowerCase() === 'manager' ? 'badge-done' : 'badge-draft'}`}>
                           {user.role}
                         </span>
+                      </td>
+                      <td>
+                        {user.id === profile?.id || String(user.role).toLowerCase() === 'warehouse staff' ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-danger-outline btn-sm"
+                            onClick={() => { void revokeUserRole(user) }}
+                            disabled={revokeBusyId === user.id || deleteBusyId === user.id}
+                          >
+                            {revokeBusyId === user.id ? 'Revoking…' : 'Revoke Role'}
+                          </button>
+                        )}
                       </td>
                       <td>
                         {user.id === profile?.id ? (
@@ -2777,11 +2812,11 @@ function ProfilePage({
                         ) : (
                           <button
                             type="button"
-                            className="btn btn-danger-outline btn-sm"
-                            onClick={() => { void revokeUserRole(user) }}
-                            disabled={revokeBusyId === user.id}
+                            className="btn btn-danger btn-sm"
+                            onClick={() => { void deleteUser(user) }}
+                            disabled={deleteBusyId === user.id || revokeBusyId === user.id}
                           >
-                            {revokeBusyId === user.id ? 'Revoking…' : 'Revoke Role'}
+                            {deleteBusyId === user.id ? 'Deleting…' : 'Delete'}
                           </button>
                         )}
                       </td>

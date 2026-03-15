@@ -684,6 +684,56 @@ app.post('/api/admin/users/:id/revoke-role', requireAuth, requireRole(ADMIN_ROLE
   }
 })
 
+app.delete('/api/admin/users/:id', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  const userId = Number(req.params.id)
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ message: 'Invalid user id' })
+  }
+
+  if (userId === req.user.id) {
+    return res.status(400).json({ message: 'You cannot delete your own account.' })
+  }
+
+  const db = await getDb()
+  try {
+    const targetUser = await db.get('SELECT id, name, email, role FROM Users WHERE id = ?', userId)
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (String(targetUser.role || '').trim().toLowerCase() === 'admin') {
+      const adminCountRow = await db.get("SELECT COUNT(*) AS count FROM Users WHERE LOWER(role) = 'admin'")
+      const adminCount = Number(adminCountRow?.count || 0)
+      if (adminCount <= 1) {
+        return res.status(400).json({ message: 'Cannot delete the last admin account.' })
+      }
+    }
+
+    await db.run('DELETE FROM Users WHERE id = ?', userId)
+
+    // Audit trail
+    try {
+      await db.run(
+        `INSERT INTO Role_Audit_Log (action, target_user_id, target_user_email, old_role, new_role, performed_by_id, performed_by_email, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        'USER_DELETED',
+        targetUser.id,
+        String(targetUser.email).toLowerCase().trim(),
+        targetUser.role,
+        null,
+        req.user.id,
+        String(req.user.email).toLowerCase().trim(),
+        `User account deleted by admin`,
+      )
+    } catch (_auditErr) { /* non-fatal */ }
+
+    return res.json({ message: `User ${targetUser.name} has been deleted.` })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to delete user' })
+  }
+})
+
+
 app.get('/api/admin/role-audit-log', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 200)
