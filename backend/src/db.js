@@ -177,6 +177,19 @@ async function initDb() {
       FOREIGN KEY (to_location_id) REFERENCES Locations(id),
       FOREIGN KEY (operation_id) REFERENCES Operations(id)
     );
+
+    CREATE TABLE IF NOT EXISTS Role_Audit_Log (
+      id SERIAL PRIMARY KEY,
+      action TEXT NOT NULL,
+      target_user_id INTEGER,
+      target_user_email TEXT,
+      old_role TEXT,
+      new_role TEXT,
+      performed_by_id INTEGER,
+      performed_by_email TEXT,
+      note TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `)
 
   // Supabase security hardening: enable RLS on tables exposed via public schema.

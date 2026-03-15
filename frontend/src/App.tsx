@@ -98,6 +98,26 @@ type UserRoleRequestStatus = {
   review_note: string | null
 }
 
+type AdminManagedUser = {
+  id: number
+  name: string
+  email: string
+  role: string
+}
+
+type RoleAuditEntry = {
+  id: number
+  action: string
+  target_user_id: number | null
+  target_user_email: string | null
+  old_role: string | null
+  new_role: string | null
+  performed_by_id: number | null
+  performed_by_email: string | null
+  note: string | null
+  created_at: string
+}
+
 type Toast = {
   id: number
   kind: 'success' | 'error' | 'info'
@@ -2425,6 +2445,11 @@ function ProfilePage({
   const [roleRequests, setRoleRequests] = useState<AdminRoleRequest[]>([])
   const [roleRequestsLoading, setRoleRequestsLoading] = useState(false)
   const [decisionBusyId, setDecisionBusyId] = useState<number | null>(null)
+  const [managedUsers, setManagedUsers] = useState<AdminManagedUser[]>([])
+  const [managedUsersLoading, setManagedUsersLoading] = useState(false)
+  const [revokeBusyId, setRevokeBusyId] = useState<number | null>(null)
+  const [auditLog, setAuditLog] = useState<RoleAuditEntry[]>([])
+  const [auditLogLoading, setAuditLogLoading] = useState(false)
 
   const loadRoleRequests = useCallback(async () => {
     if (!token) return
@@ -2461,6 +2486,57 @@ function ProfilePage({
     }
   }
 
+  const loadManagedUsers = useCallback(async () => {
+    if (!token) return
+
+    setManagedUsersLoading(true)
+    try {
+      const data = await apiRequest<AdminManagedUser[]>('/admin/users', 'GET', token)
+      setManagedUsers(Array.isArray(data) ? data : [])
+    } catch (error) {
+      if (isAdminRole(profile?.role)) {
+        pushToast('error', (error as Error).message)
+      }
+      setManagedUsers([])
+    } finally {
+      setManagedUsersLoading(false)
+    }
+  }, [profile?.role, pushToast, token])
+
+  const loadAuditLog = useCallback(async () => {
+    if (!token) return
+    setAuditLogLoading(true)
+    try {
+      const data = await apiRequest<RoleAuditEntry[]>('/admin/role-audit-log', 'GET', token)
+      setAuditLog(Array.isArray(data) ? data : [])
+    } catch {
+      setAuditLog([])
+    } finally {
+      setAuditLogLoading(false)
+    }
+  }, [token])
+
+  const revokeUserRole = async (user: AdminManagedUser) => {
+    if (user.id === profile?.id) {
+      pushToast('error', 'You cannot revoke your own role.')
+      return
+    }
+
+    const ok = window.confirm(`Revoke ${user.name}'s role (${user.role}) to Warehouse Staff?`)
+    if (!ok) return
+
+    setRevokeBusyId(user.id)
+    try {
+      await apiRequest(`/admin/users/${user.id}/revoke-role`, 'POST', token ?? undefined)
+      pushToast('success', `${user.name}'s role has been revoked`)
+      await Promise.all([loadManagedUsers(), loadRoleRequests(), loadAuditLog()])
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setRevokeBusyId(null)
+    }
+  }
+
   useEffect(() => {
     const load = async () => {
       setLoading(true)
@@ -2489,17 +2565,23 @@ function ProfilePage({
   useEffect(() => {
     if (!isAdminRole(profile?.role)) {
       setRoleRequests([])
+      setManagedUsers([])
+      setAuditLog([])
       return
     }
 
     loadRoleRequests()
+    loadManagedUsers()
+    loadAuditLog()
 
     const timer = setInterval(() => {
       loadRoleRequests()
+      loadManagedUsers()
+      loadAuditLog()
     }, LIVE_SYNC_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [loadRoleRequests, profile?.role])
+  }, [loadAuditLog, loadManagedUsers, loadRoleRequests, profile?.role])
 
   const roleRequestBadgeClass =
     roleRequestStatus?.status === 'pending'
@@ -2534,7 +2616,7 @@ function ProfilePage({
       </div>
 
       <div className="profile-grid">
-        <div className="panel-card profile-card">
+        <div className="panel-card profile-card profile-card-full">
           <div className="panel-card-header">Account Details</div>
           <div className="panel-card-body">
             {loading && <p className="muted">Loading profile…</p>}
@@ -2603,63 +2685,156 @@ function ProfilePage({
       </div>
 
       {isAdminRole(profile?.role) && (
-        <div className="list-card">
-          <div className="list-header">
-            <h2>Pending Role Requests</h2>
-            <p className="muted">Approve or reject verified requests awaiting admin decision.</p>
-          </div>
-          <div className="data-table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Requested Role</th>
-                  <th>Status</th>
-                  <th>Requested At</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {roleRequestsLoading && <tr className="empty-row"><td colSpan={6}>Loading requests…</td></tr>}
-                {!roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>No pending approvals right now.</td></tr>}
-                {!roleRequestsLoading && actionableRoleRequests.map((request) => (
-                  <tr key={request.id}>
-                    <td><strong>{request.name}</strong></td>
-                    <td>{request.email}</td>
-                    <td><span className="badge badge-ready">{request.requested_role}</span></td>
-                    <td>
-                      <span className="badge badge-waiting">
-                        Pending
-                      </span>
-                    </td>
-                    <td>{formatDate(request.created_at)}</td>
-                    <td>
-                      <div className="operation-row-actions">
-                        <button
-                          type="button"
-                          className="btn btn-success btn-sm"
-                          onClick={() => { void decideRoleRequest(request.id, 'approve') }}
-                          disabled={decisionBusyId === request.id}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-danger-outline btn-sm"
-                          onClick={() => { void decideRoleRequest(request.id, 'reject') }}
-                          disabled={decisionBusyId === request.id}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </td>
+        <>
+          <div className="list-card">
+            <div className="list-header">
+              <h2>Pending Role Requests</h2>
+              <p className="muted">Approve or reject verified requests awaiting admin decision.</p>
+            </div>
+            <div className="data-table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Requested Role</th>
+                    <th>Status</th>
+                    <th>Requested At</th>
+                    <th>Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {roleRequestsLoading && <tr className="empty-row"><td colSpan={6}>Loading requests…</td></tr>}
+                  {!roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>No pending approvals right now.</td></tr>}
+                  {!roleRequestsLoading && actionableRoleRequests.map((request) => (
+                    <tr key={request.id}>
+                      <td><strong>{request.name}</strong></td>
+                      <td>{request.email}</td>
+                      <td><span className="badge badge-ready">{request.requested_role}</span></td>
+                      <td>
+                        <span className="badge badge-waiting">
+                          Pending
+                        </span>
+                      </td>
+                      <td>{formatDate(request.created_at)}</td>
+                      <td>
+                        <div className="operation-row-actions">
+                          <button
+                            type="button"
+                            className="btn btn-success btn-sm"
+                            onClick={() => { void decideRoleRequest(request.id, 'approve') }}
+                            disabled={decisionBusyId === request.id}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger-outline btn-sm"
+                            onClick={() => { void decideRoleRequest(request.id, 'reject') }}
+                            disabled={decisionBusyId === request.id}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          <div className="list-card">
+            <div className="list-header">
+              <h2>Role Access Management</h2>
+              <p className="muted">Revoke elevated access and set users back to Warehouse Staff.</p>
+            </div>
+            <div className="data-table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Current Role</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {managedUsersLoading && <tr className="empty-row"><td colSpan={4}>Loading users…</td></tr>}
+                  {!managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={4}>No elevated users found.</td></tr>}
+                  {!managedUsersLoading && managedUsers.map((user) => (
+                    <tr key={user.id}>
+                      <td><strong>{user.name}</strong></td>
+                      <td>{user.email}</td>
+                      <td>
+                        <span className={`badge ${String(user.role).toLowerCase() === 'admin' ? 'badge-ready' : 'badge-done'}`}>
+                          {user.role}
+                        </span>
+                      </td>
+                      <td>
+                        {user.id === profile?.id ? (
+                          <span className="muted">Current admin</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-danger-outline btn-sm"
+                            onClick={() => { void revokeUserRole(user) }}
+                            disabled={revokeBusyId === user.id}
+                          >
+                            {revokeBusyId === user.id ? 'Revoking…' : 'Revoke Role'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="list-card">
+            <div className="list-header">
+              <h2>Role Audit History</h2>
+              <p className="muted">Record of all role approvals, rejections, and revocations.</p>
+            </div>
+            <div className="data-table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Action</th>
+                    <th>Target User</th>
+                    <th>Role Change</th>
+                    <th>Performed By</th>
+                    <th>Note</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLogLoading && <tr className="empty-row"><td colSpan={6}>Loading audit log…</td></tr>}
+                  {!auditLogLoading && auditLog.length === 0 && <tr className="empty-row"><td colSpan={6}>No role actions recorded yet.</td></tr>}
+                  {!auditLogLoading && auditLog.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>
+                        <span className={`badge ${entry.action === 'ROLE_APPROVED' ? 'badge-done' : entry.action === 'ROLE_REVOKED' ? 'badge-canceled' : 'badge-draft'}`}>
+                          {entry.action === 'ROLE_APPROVED' ? 'Approved' : entry.action === 'ROLE_REJECTED' ? 'Rejected' : 'Revoked'}
+                        </span>
+                      </td>
+                      <td>{entry.target_user_email ?? '—'}</td>
+                      <td>
+                        {entry.old_role && entry.new_role
+                          ? <span>{entry.old_role} → {entry.new_role}</span>
+                          : entry.new_role ?? '—'}
+                      </td>
+                      <td>{entry.performed_by_email ?? '—'}</td>
+                      <td className="muted">{entry.note ?? '—'}</td>
+                      <td className="muted">{new Date(entry.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </section>
   )

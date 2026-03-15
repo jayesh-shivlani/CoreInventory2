@@ -526,6 +526,21 @@ app.post('/api/admin/role-requests/:id/approve', requireAuth, requireRole(ADMIN_
       )
 
       await db.exec('COMMIT')
+
+      // Audit trail
+      try {
+        await db.run(
+          `INSERT INTO Role_Audit_Log (action, target_user_email, new_role, performed_by_id, performed_by_email, note)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          'ROLE_APPROVED',
+          String(pending.email).toLowerCase().trim(),
+          pending.role,
+          req.user.id,
+          String(req.user.email).toLowerCase().trim(),
+          `Approved role request for ${pending.role}`,
+        )
+      } catch (_auditErr) { /* non-fatal */ }
+
       return res.json({ message: `Role request approved. User can now access ${pending.role} permissions.` })
     } catch (error) {
       await db.exec('ROLLBACK')
@@ -555,6 +570,8 @@ app.post('/api/admin/role-requests/:id/reject', requireAuth, requireRole(ADMIN_R
       return res.status(400).json({ message: 'Role request is not pending admin approval' })
     }
 
+    const pendingForReject = await db.get('SELECT email, role FROM Signup_Verifications WHERE id = ?', requestId)
+
     await db.run(
       `
         UPDATE Signup_Verifications
@@ -566,9 +583,122 @@ app.post('/api/admin/role-requests/:id/reject', requireAuth, requireRole(ADMIN_R
       requestId,
     )
 
+    // Audit trail
+    try {
+      await db.run(
+        `INSERT INTO Role_Audit_Log (action, target_user_email, new_role, performed_by_id, performed_by_email, note)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        'ROLE_REJECTED',
+        pendingForReject ? String(pendingForReject.email).toLowerCase().trim() : null,
+        pendingForReject ? pendingForReject.role : null,
+        req.user.id,
+        String(req.user.email).toLowerCase().trim(),
+        reviewNote,
+      )
+    } catch (_auditErr) { /* non-fatal */ }
+
     return res.json({ message: 'Role request rejected' })
   } catch (error) {
     return res.status(500).json({ message: 'Failed to reject role request' })
+  }
+})
+
+app.get('/api/admin/users', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  try {
+    const scope = String(req.query.scope || 'elevated').trim().toLowerCase()
+    const db = await getDb()
+    const rows = scope === 'all'
+      ? await db.all(
+          `
+            SELECT id, name, email, role
+            FROM Users
+            ORDER BY name ASC
+          `,
+        )
+      : await db.all(
+          `
+            SELECT id, name, email, role
+            FROM Users
+            WHERE LOWER(role) <> LOWER(?)
+            ORDER BY name ASC
+          `,
+          'Warehouse Staff',
+        )
+
+    return res.json(rows)
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to load users' })
+  }
+})
+
+app.post('/api/admin/users/:id/revoke-role', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  const userId = Number(req.params.id)
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ message: 'Invalid user id' })
+  }
+
+  if (userId === req.user.id) {
+    return res.status(400).json({ message: 'You cannot revoke your own role.' })
+  }
+
+  const db = await getDb()
+  try {
+    const targetUser = await db.get('SELECT id, name, email, role FROM Users WHERE id = ?', userId)
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (String(targetUser.role || '').trim().toLowerCase() === 'warehouse staff') {
+      return res.status(400).json({ message: 'User already has warehouse staff access.' })
+    }
+
+    if (String(targetUser.role || '').trim().toLowerCase() === 'admin') {
+      const adminCountRow = await db.get("SELECT COUNT(*) AS count FROM Users WHERE LOWER(role) = 'admin'")
+      const adminCount = Number(adminCountRow?.count || 0)
+      if (adminCount <= 1) {
+        return res.status(400).json({ message: 'Cannot revoke the last admin account.' })
+      }
+    }
+
+    await db.run('UPDATE Users SET role = ? WHERE id = ?', 'Warehouse Staff', userId)
+
+    // Audit trail
+    try {
+      await db.run(
+        `INSERT INTO Role_Audit_Log (action, target_user_id, target_user_email, old_role, new_role, performed_by_id, performed_by_email, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        'ROLE_REVOKED',
+        targetUser.id,
+        String(targetUser.email).toLowerCase().trim(),
+        targetUser.role,
+        'Warehouse Staff',
+        req.user.id,
+        String(req.user.email).toLowerCase().trim(),
+        `Role revoked from ${targetUser.role} to Warehouse Staff by admin`,
+      )
+    } catch (_auditErr) { /* non-fatal */ }
+
+    return res.json({ message: 'User role revoked to Warehouse Staff.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to revoke user role' })
+  }
+})
+
+app.get('/api/admin/role-audit-log', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200)
+    const db = await getDb()
+    const rows = await db.all(
+      `SELECT id, action, target_user_id, target_user_email, old_role, new_role,
+              performed_by_id, performed_by_email, note, created_at
+       FROM Role_Audit_Log
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      limit,
+    )
+    return res.json(rows)
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to load audit log' })
   }
 })
 
