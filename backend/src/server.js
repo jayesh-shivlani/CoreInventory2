@@ -116,18 +116,20 @@ function buildSmtpTransporter() {
     return null
   }
 
+  const isGmail = smtpHost === 'smtp.gmail.com'
+
   return nodemailer.createTransport({
-    host: smtpHost,
+    service: isGmail ? 'gmail' : undefined,
+    host: !isGmail ? smtpHost : undefined,
     port: smtpPort,
     secure: smtpPort === 465,
-    requireTLS: smtpPort !== 465,
-    connectionTimeout: SMTP_TIMEOUT_MS,
-    greetingTimeout: SMTP_TIMEOUT_MS,
-    socketTimeout: SMTP_TIMEOUT_MS,
     auth: {
       user: smtpUser,
       pass: smtpPass,
     },
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
   })
 }
 
@@ -162,7 +164,7 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
       throw new Error('SMTP is not configured')
     }
     console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
-    return { delivered: false }
+    return { delivered: false, exposed: true }
   }
 
   for (let attempt = 1; attempt <= SMTP_MAX_ATTEMPTS; attempt += 1) {
@@ -201,9 +203,9 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
     }
   }
 
-  if (!isProduction) {
+  if (!isProduction && EXPOSE_DEV_OTP) {
     console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`)
-    return { delivered: false }
+    return { delivered: false, exposed: true }
   }
 
   throw smtpError || new Error('Email service failed to deliver OTP')
@@ -240,7 +242,14 @@ app.use(express.json())
 app.get('/api/health', async (req, res) => {
   const db = await getDb()
   const row = await db.get('SELECT datetime("now") AS now')
-  res.json({ status: 'ok', databaseTime: row.now })
+  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS)
+  res.json({
+    status: 'ok',
+    databaseTime: row.now,
+    emailProvider: 'smtp',
+    emailConfigured: smtpConfigured,
+    emailSender: process.env.FROM_EMAIL || process.env.SMTP_USER || null,
+  })
 })
 
 app.post('/api/auth/register', async (req, res) => {
@@ -285,12 +294,11 @@ app.post('/api/auth/register', async (req, res) => {
     if (!otp) {
       const generatedOtp = String(Math.floor(100000 + Math.random() * 900000))
       const hash = await bcrypt.hash(String(password), 10)
-      const otpExpiresAt = getOtpExpiryIso()
 
       await db.run(
         `
           INSERT INTO Signup_Verifications (email, name, password_hash, role, status, otp_code, otp_expires_at, created_at)
-          VALUES (?, ?, ?, ?, 'OTP_PENDING', ?, ?, CURRENT_TIMESTAMP)
+          VALUES (?, ?, ?, ?, 'OTP_PENDING', ?, (CURRENT_TIMESTAMP + (?::text || ' minutes')::interval), CURRENT_TIMESTAMP)
           ON CONFLICT (email)
           DO UPDATE SET
             name = EXCLUDED.name,
@@ -309,13 +317,16 @@ app.post('/api/auth/register', async (req, res) => {
         hash,
         normalizedRole,
         generatedOtp,
-        otpExpiresAt,
+        OTP_TTL_MINUTES,
       )
 
       try {
         const delivery = await sendOtpEmail(normalizedEmail, generatedOtp, 'signup verification')
-        if (!delivery.delivered && EXPOSE_DEV_OTP) {
-          return res.status(202).json({ message: 'OTP generated in development mode', dev_otp: generatedOtp })
+        if (delivery.exposed || (!delivery.delivered && EXPOSE_DEV_OTP)) {
+          return res.status(202).json({ message: 'OTP generated and logged in console', dev_otp: generatedOtp })
+        }
+        if (!delivery.delivered) {
+          return res.status(503).json({ message: 'OTP email delivery is unavailable. Please try again shortly.' })
         }
       } catch (error) {
         return res.status(500).json({ message: toOtpDeliveryMessage(error) })
@@ -342,7 +353,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     if (String(otp).trim() !== String(pending.otp_code || '').trim()) {
-      return res.status(400).json({ message: 'Invalid OTP code' })
+      return res.status(400).json({ message: 'Invalid OTP code. If you requested a new OTP, use the latest one from your email.' })
     }
 
     const notExpired = await db.get(
@@ -425,13 +436,22 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
     if (!otp || !newPassword) {
       const generatedOtp = String(Math.floor(100000 + Math.random() * 900000))
-      const resetOtpExpiresAt = new Date(Date.now() + RESET_OTP_TTL_MINUTES * 60 * 1000).toISOString()
-      await db.run('UPDATE Users SET otp_code = ?, reset_otp_expires_at = ? WHERE id = ?', generatedOtp, resetOtpExpiresAt, user.id)
+      await db.run(
+        `UPDATE Users
+         SET otp_code = ?, reset_otp_expires_at = (CURRENT_TIMESTAMP + (?::text || ' minutes')::interval)
+         WHERE id = ?`,
+        generatedOtp,
+        RESET_OTP_TTL_MINUTES,
+        user.id,
+      )
 
       try {
         const delivery = await sendOtpEmail(String(email).toLowerCase().trim(), generatedOtp, 'password reset')
-        if (!delivery.delivered && EXPOSE_DEV_OTP) {
-          return res.json({ message: 'OTP generated in development mode', dev_otp: generatedOtp })
+        if (delivery.exposed || (!delivery.delivered && EXPOSE_DEV_OTP)) {
+          return res.json({ message: 'OTP generated and logged in console', dev_otp: generatedOtp })
+        }
+        if (!delivery.delivered) {
+          return res.status(503).json({ message: 'OTP email delivery is unavailable. Please try again shortly.' })
         }
       } catch (error) {
         return res.status(500).json({ message: toOtpDeliveryMessage(error) })
@@ -445,7 +465,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 
     if (String(otp).trim() !== String(user.otp_code || '').trim()) {
-      return res.status(400).json({ message: 'Invalid OTP code' })
+      return res.status(400).json({ message: 'Invalid OTP code. If you requested a new OTP, use the latest one from your email.' })
     }
 
     const notExpired = await db.get(
