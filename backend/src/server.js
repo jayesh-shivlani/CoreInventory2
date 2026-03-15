@@ -45,10 +45,13 @@ async function hasMxRecord(email) {
     const normalized = String(email || '').trim().toLowerCase()
     const [, domain] = normalized.split('@')
     if (!domain) return false
-    const records = await dns.resolveMx(domain)
+    // On some cloud environments (like Render), DNS MX lookup might fail or timeout.
+    // If we can't resolve MX, we'll allow the email to proceed to avoid false negatives.
+    const records = await withTimeout(dns.resolveMx(domain), 4000).catch(() => null)
+    if (records === null) return true // DNS error or timeout, assume valid to be safe
     return Array.isArray(records) && records.length > 0
   } catch {
-    return false
+    return true // Fallback to true on any error to avoid blocking valid signups
   }
 }
 
@@ -154,6 +157,45 @@ async function getVerifiedSmtpTransporter() {
   return smtpTransporter
 }
 
+async function sendOtpBrevo(toEmail, otp, purpose = 'password reset') {
+  const apiKey = process.env.BREVO_API_KEY
+  const fromEmail = process.env.FROM_EMAIL || process.env.SMTP_USER || 'coreinventory.support@gmail.com'
+  const fromName = 'Core Inventory'
+
+  if (!apiKey) return null
+
+  try {
+    const response = await withTimeout(
+      fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: fromName, email: fromEmail },
+          to: [{ email: toEmail }],
+          subject: `Core Inventory OTP for ${purpose}`,
+          htmlContent: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
+        }),
+      }),
+      SMTP_TIMEOUT_MS,
+      'Brevo API timed out',
+    )
+
+    const data = await response.json()
+    if (response.ok) {
+      return { delivered: true }
+    }
+    console.error('Brevo API error:', data)
+    return null
+  } catch (error) {
+    console.error('Brevo API failed:', error)
+    return null
+  }
+}
+
 async function sendOtpResend(toEmail, otp, purpose = 'password reset') {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.FROM_EMAIL || 'onboarding@resend.dev'
@@ -196,7 +238,15 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
   const isProduction = process.env.NODE_ENV === 'production'
   let smtpError = null
 
-  // Try Resend first if configured
+  // Try Brevo first if configured (Best for Render/Cloud)
+  if (process.env.BREVO_API_KEY) {
+    const brevoDelivery = await sendOtpBrevo(toEmail, otp, purpose)
+    if (brevoDelivery && brevoDelivery.delivered) {
+      return brevoDelivery
+    }
+  }
+
+  // Try Resend as second choice
   if (process.env.RESEND_API_KEY) {
     const resendDelivery = await sendOtpResend(toEmail, otp, purpose)
     if (resendDelivery && resendDelivery.delivered) {
