@@ -154,10 +154,55 @@ async function getVerifiedSmtpTransporter() {
   return smtpTransporter
 }
 
+async function sendOtpResend(toEmail, otp, purpose = 'password reset') {
+  const apiKey = process.env.RESEND_API_KEY
+  const from = process.env.FROM_EMAIL || 'onboarding@resend.dev'
+
+  if (!apiKey) return null
+
+  try {
+    const response = await withTimeout(
+      fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from,
+          to: toEmail,
+          subject: `Core Inventory OTP for ${purpose}`,
+          html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
+        }),
+      }),
+      SMTP_TIMEOUT_MS,
+      'Resend API timed out',
+    )
+
+    const data = await response.json()
+    if (response.ok) {
+      return { delivered: true }
+    }
+    console.error('Resend API error:', data)
+    return null
+  } catch (error) {
+    console.error('Resend API failed:', error)
+    return null
+  }
+}
+
 async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
   const from = process.env.FROM_EMAIL || process.env.SMTP_USER || 'coreinventory.support@gmail.com'
   const isProduction = process.env.NODE_ENV === 'production'
   let smtpError = null
+
+  // Try Resend first if configured
+  if (process.env.RESEND_API_KEY) {
+    const resendDelivery = await sendOtpResend(toEmail, otp, purpose)
+    if (resendDelivery && resendDelivery.delivered) {
+      return resendDelivery
+    }
+  }
 
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     if (isProduction) {

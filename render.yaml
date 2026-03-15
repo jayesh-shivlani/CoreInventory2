@@ -37,3 +37,5 @@ services:
         value: "10"
       - key: RESET_OTP_TTL_MINUTES
         value: "10"
+      - key: RESEND_API_KEY
+        sync: false
