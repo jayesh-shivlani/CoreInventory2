@@ -81,9 +81,9 @@ function buildReference(type, id) {
 
 async function initDb() {
   const db = await getDb()
-  const DEFAULT_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'jayeshshivlani23@gmail.com').toLowerCase().trim()
-  const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'jay123'
-  const DEFAULT_ADMIN_NAME = process.env.ADMIN_NAME || 'Jayesh Shivlani'
+  const DEFAULT_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'admin@example.com').toLowerCase().trim()
+  const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Admin@12345'
+  const DEFAULT_ADMIN_NAME = process.env.ADMIN_NAME || 'Admin User'
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS Users (

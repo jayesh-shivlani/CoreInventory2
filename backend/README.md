@@ -106,6 +106,21 @@ Locations:
 
 ## Authorization Notes
 
+Notifications:
+
+- `GET /api/notifications` — role-filtered: low-stock, pending approvals, operation status
+
+Admin (Admin role required):
+
+- `GET /api/admin/role-requests`
+- `POST /api/admin/role-requests/:id/approve`
+- `POST /api/admin/role-requests/:id/reject`
+- `POST /api/admin/role-requests/:id/revoke`
+- `DELETE /api/admin/users/:id`
+- `GET /api/admin/role-audit-log`
+
+## Authorization Notes
+
 - All operational and read APIs require a valid JWT.
 - Manager/Admin role is required for sensitive write routes:
 	- `POST /api/products`
@@ -119,3 +134,25 @@ Locations:
 
 - Email: `demo@coreinventory.app`
 - Password: `demo12345`
+
+- All operational and read APIs require a valid JWT.
+- Manager/Admin role is required for sensitive write routes:
+	- `POST /api/products`
+	- `PUT /api/products/:id`
+	- `DELETE /api/products/:id`
+	- `POST /api/locations`
+	- `DELETE /api/locations/:id`
+	- `DELETE /api/operations/:id`
+- Admin role is required for all `/api/admin/*` routes.
+
+## Environment Variables — Admin Seed
+
+On first startup, the database is seeded with a default admin user. Configure these before deploying:
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADMIN_EMAIL` | `admin@example.com` | Default admin login email |
+| `ADMIN_PASSWORD` | `Admin@12345` | Default admin password |
+| `ADMIN_NAME` | `Admin User` | Display name for default admin |
+
+Always override the defaults via environment variables in production.

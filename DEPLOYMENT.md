@@ -16,6 +16,12 @@ Set these in Render for the web service:
 - `DATABASE_URL`: PostgreSQL connection string
 - `ALLOWED_ORIGINS`: comma-separated frontend origins (for CORS)
 
+Admin seed (set before first deploy — these seed the default admin account):
+
+- `ADMIN_EMAIL`: admin login email (default: `admin@example.com`)
+- `ADMIN_PASSWORD`: admin password (default: `Admin@12345`) — **change this in production**
+- `ADMIN_NAME`: admin display name (default: `Admin User`)
+
 Auto-provisioned in blueprint:
 
 - `NODE_ENV=production`

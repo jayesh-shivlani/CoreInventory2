@@ -1,12 +1,8 @@
-Key Note : "I have updated the website to add more features like signup verification through otp and added some small meaningful changes after the coding time was completed and those are not covered in the video so please check out the website" 
-
 # Core Inventory IMS
 
-Core Inventory IMS is a full-stack inventory management system for product cataloging, warehouse stock control, and internal logistics operations.
+A full-stack inventory management system for product cataloging, warehouse stock control, and internal logistics operations.
 
-Live application: https://coreinventory.onrender.com
-
-video url : https://drive.google.com/file/d/1rprBFxXs6ZmwSgB-RUAOZ2p4K6txWbzU/view?usp=drive_link
+**Live demo:** https://coreinventory.onrender.com
 
 ## Project Snapshot
 
@@ -19,24 +15,27 @@ video url : https://drive.google.com/file/d/1rprBFxXs6ZmwSgB-RUAOZ2p4K6txWbzU/vi
 
 ## Features
 
-- Authentication
-	- Register, login, profile fetch
-	- Signup verification via OTP
-	- OTP-assisted password reset
-- Inventory visibility
-	- KPI dashboard with filters
-	- Product list with stock and low-stock logic
-- Stock operations
-	- Receipts
-	- Delivery orders
-	- Internal transfers
-	- Inventory adjustments
-- Operational traceability
-	- Immutable stock ledger (move history)
-- Master data
-	- Warehouse/location management
-- Access control
-	- Role-aware authorization for sensitive write operations
+- **Authentication**
+	- Register, login, profile
+	- Email OTP signup verification
+	- OTP-assisted password reset with confirm-password validation
+- **Access control**
+	- Role hierarchy: Admin › Manager › Warehouse Staff
+	- Admin approval workflow for new role requests
+	- Admin can approve, reject, revoke roles, and delete users
+	- Role-action audit log
+- **Notifications**
+	- Real-time in-app notification bell (polls every 8 s)
+	- Role-filtered: low-stock alerts, pending approvals, operation status
+- **Inventory visibility**
+	- KPI dashboard with filters and contextual icons
+	- Product list with stock levels and low-stock highlighting
+- **Stock operations**
+	- Receipts, delivery orders, internal transfers, inventory adjustments
+- **Operational traceability**
+	- Immutable stock ledger capturing every move
+- **Master data**
+	- Warehouse and location management
 
 ## Repository Structure
 
@@ -119,22 +118,42 @@ npm run dev:frontend
 
 ## API Highlights
 
-- `POST /api/auth/register`
+Auth & users:
+- `POST /api/auth/register` — OTP signup request / verify
 - `POST /api/auth/login`
 - `POST /api/auth/reset-password`
 - `GET /api/users/me`
+
+Dashboard:
 - `GET /api/dashboard/kpis`
 - `GET /api/dashboard/filters`
+
+Products & inventory:
 - `GET /api/products`
 - `POST /api/products`
 - `PUT /api/products/:id`
 - `GET /api/products/:id/stock`
+
+Operations & ledger:
 - `GET /api/operations`
 - `POST /api/operations`
-- `POST /api/operations/:id/status`
 - `POST /api/operations/:id/validate`
 - `GET /api/ledger`
+
+Locations:
 - `GET /api/locations`
+- `POST /api/locations`
+
+Admin (Admin role required):
+- `GET /api/admin/role-requests`
+- `POST /api/admin/role-requests/:id/approve`
+- `POST /api/admin/role-requests/:id/reject`
+- `POST /api/admin/role-requests/:id/revoke`
+- `DELETE /api/admin/users/:id`
+- `GET /api/admin/role-audit-log`
+
+Notifications:
+- `GET /api/notifications`
 
 ## Deployment
 
@@ -148,5 +167,6 @@ npm run dev:frontend
 
 ## Notes
 
-- This repository is prepared for technical review and product demonstration workflows.
-- If publishing publicly, ensure no production secrets are committed.
+- All secrets and credentials must be provided via environment variables — never commit `.env` files.
+- See `DEPLOYMENT.md` for the full list of required and optional environment variables.
+- Demo credentials above are valid for the live Render deployment only.

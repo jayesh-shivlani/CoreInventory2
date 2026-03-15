@@ -2,6 +2,8 @@ require('dotenv').config({ path: './.env' })
 const { getDb } = require('../src/db')
 
 const base = 'http://localhost:4000/api'
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com'
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Admin@12345'
 const email = `smoke.role.${Date.now()}@example.com`
 const password = 'smoke12345'
 const name = 'Smoke Role User'
@@ -49,7 +51,7 @@ async function main() {
   const adminLogin = await api('/auth/login', {
     method: 'POST',
     headers: jsonHeaders,
-    body: JSON.stringify({ email: 'jayeshshivlani23@gmail.com', password: 'jay123' }),
+    body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
   })
 
   const pendingRequests = await api('/admin/role-requests', {

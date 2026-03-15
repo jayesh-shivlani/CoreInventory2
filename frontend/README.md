@@ -19,6 +19,27 @@ React + TypeScript frontend for Core Inventory IMS.
 - Warehouse/location settings
 - User profile and session handling
 
+- **Authentication**
+	- Login, sign up with email OTP verification
+	- Password reset with OTP and confirm-password validation
+	- Real-time password match indicator on signup and reset forms
+- **Dashboard**
+	- KPI cards with contextual icons
+	- Filters for document type, status, warehouse, and category
+	- Low-stock product alerts
+- **Product catalog** — stock levels, low-stock highlighting
+- **Operation management** — receipts, deliveries, internal transfers, adjustments
+- **Stock ledger** — immutable move history
+- **Notifications bell**
+	- Role-filtered in-app alerts (low stock, pending approvals, operation status)
+	- Per-item dismiss and clear-all
+- **Admin panel** (profile page, Admin role only)
+	- Approve / reject pending role requests
+	- Revoke roles and delete users
+	- Role-action audit history table
+- **User profile** — role request status, account details
+- **Warehouse / location settings**
+
 ## Stack
 
 - React 19
