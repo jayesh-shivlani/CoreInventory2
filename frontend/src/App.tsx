@@ -1050,58 +1050,8 @@ function DashboardPage({
 
   return (
     <section className="dashboard-page">
-      <div className="dashboard-hero-card">
-        <div className="dashboard-title">Inventory Dashboard</div>
-        <p className="dashboard-subtitle">Realtime status of inventory, operations, and transfer workload.</p>
-        <div className="dashboard-meta-grid">
-          <div className="dashboard-meta-item">
-            <span>Filters Applied</span>
-            <strong>{activeDashboardFilters}</strong>
-          </div>
-          <div className="dashboard-meta-item">
-            <span>Pending Work</span>
-            <strong>{kpis.pendingReceipts + kpis.pendingDeliveries + kpis.scheduledInternalTransfers}</strong>
-          </div>
-          <div className="dashboard-meta-item">
-            <span>Stock Risk</span>
-            <strong>{kpis.lowOrOutOfStockItems}</strong>
-          </div>
-        </div>
-      </div>
 
-      {lowStockProducts.length > 0 && (
-        <div className="dashboard-header-card low-stock-alert-card">
-          <div className="list-header dashboard-section-header">
-            <h2>Low Stock Alerts</h2>
-            <span className="alert-count-pill">{lowStockProducts.length} product(s)</span>
-          </div>
-          <div className="low-stock-alert-list">
-            {lowStockProducts.slice(0, 6).map((product) => (
-              <div key={product.id} className="low-stock-alert-item">
-                <strong>{product.name}</strong>
-                <span>{product.sku}</span>
-                <span>
-                  On hand {safeNumber(product.availableStock)} / Reorder min {safeNumber(product.reorder_minimum)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="dashboard-header-card">
-        <div className="list-header dashboard-section-header">
-          <h2>Operational Metrics</h2>
-        </div>
-        <div className="kpi-grid">
-          <KpiCard label="Total Products in Stock" value={kpis.totalProductsInStock} />
-          <KpiCard label="Low / Out of Stock" value={kpis.lowOrOutOfStockItems} variant="warning" />
-          <KpiCard label="Pending Receipts" value={kpis.pendingReceipts} />
-          <KpiCard label="Pending Deliveries" value={kpis.pendingDeliveries} />
-          <KpiCard label="Transfers Scheduled" value={kpis.scheduledInternalTransfers} variant="success" />
-        </div>
-      </div>
-
+      {/* ── Filters ── */}
       <div className="dashboard-header-card">
         <div className="list-header dashboard-section-header">
           <h2>Dashboard Filters</h2>
@@ -1150,16 +1100,84 @@ function DashboardPage({
           </div>
         </div>
       </div>
-      {loading && <p className="muted" style={{ textAlign: 'center', padding: '20px' }}>Loading KPI data…</p>}
+
+      {/* ── Hero summary ── */}
+      <div className="dashboard-hero-card">
+        <div className="dashboard-title">Inventory Dashboard</div>
+        <p className="dashboard-subtitle">Realtime status of inventory, operations, and transfer workload.</p>
+        <div className="dashboard-meta-grid">
+          <div className="dashboard-meta-item">
+            <span>Filters Applied</span>
+            <strong>{activeDashboardFilters}</strong>
+          </div>
+          <div className="dashboard-meta-item">
+            <span>Pending Work</span>
+            <strong>{kpis.pendingReceipts + kpis.pendingDeliveries + kpis.scheduledInternalTransfers}</strong>
+          </div>
+          <div className="dashboard-meta-item">
+            <span>Stock Risk</span>
+            <strong>{kpis.lowOrOutOfStockItems}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* ── KPI Cards ── */}
+      <div className="dashboard-header-card">
+        <div className="list-header dashboard-section-header">
+          <h2>Operational Metrics</h2>
+          {loading && <span className="muted" style={{ fontSize: '12px' }}>Updating…</span>}
+        </div>
+        <div className="kpi-grid">
+          <KpiCard label="Total Products in Stock" value={kpis.totalProductsInStock} icon="box" />
+          <KpiCard label="Low / Out of Stock" value={kpis.lowOrOutOfStockItems} variant="warning" icon="alert" />
+          <KpiCard label="Pending Receipts" value={kpis.pendingReceipts} icon="receipt" />
+          <KpiCard label="Pending Deliveries" value={kpis.pendingDeliveries} icon="truck" />
+          <KpiCard label="Transfers Scheduled" value={kpis.scheduledInternalTransfers} variant="success" icon="transfer" />
+        </div>
+      </div>
+
+      {/* ── Low Stock Alerts ── */}
+      {lowStockProducts.length > 0 && (
+        <div className="dashboard-header-card low-stock-alert-card">
+          <div className="list-header dashboard-section-header">
+            <h2>Low Stock Alerts</h2>
+            <span className="alert-count-pill">{lowStockProducts.length} product(s)</span>
+          </div>
+          <div className="low-stock-alert-list">
+            {lowStockProducts.slice(0, 6).map((product) => (
+              <div key={product.id} className="low-stock-alert-item">
+                <strong>{product.name}</strong>
+                <span>{product.sku}</span>
+                <span>
+                  On hand {safeNumber(product.availableStock)} / Reorder min {safeNumber(product.reorder_minimum)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
 
-function KpiCard({ label, value, variant }: { label: string; value: number; variant?: 'warning' | 'success' }) {
+const KPI_ICONS: Record<string, JSX.Element> = {
+  box: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="22" height="22"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>,
+  alert: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="22" height="22"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  receipt: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="22" height="22"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>,
+  truck: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="22" height="22"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>,
+  transfer: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="22" height="22"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>,
+}
+
+function KpiCard({ label, value, variant, icon }: { label: string; value: number; variant?: 'warning' | 'success'; icon?: string }) {
   return (
     <article className={`kpi-card${variant === 'warning' ? ' kpi-warning' : variant === 'success' ? ' kpi-success' : ''}`}>
+      <div className="kpi-card-top">
+        {icon && KPI_ICONS[icon] && (
+          <span className="kpi-icon">{KPI_ICONS[icon]}</span>
+        )}
+        <div className="kpi-value">{value}</div>
+      </div>
       <div className="kpi-label">{label}</div>
-      <div className="kpi-value">{value}</div>
     </article>
   )
 }
@@ -2751,7 +2769,7 @@ function ProfilePage({
         </div>
 
         {!isAdminRole(profile?.role) && (
-          <div className="panel-card profile-card">
+          <div className="panel-card profile-card profile-card-full profile-card-role-status">
             <div className="panel-card-header">Role Request Status</div>
             <div className="panel-card-body">
               {loading && <p className="muted">Loading role request status…</p>}

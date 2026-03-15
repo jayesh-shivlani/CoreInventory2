@@ -933,12 +933,27 @@ a { text-decoration: none; color: inherit; }
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s;
 }
 
 .kpi-card:hover { box-shadow: var(--shadow); }
+
+.kpi-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kpi-icon {
+  opacity: 0.3;
+  display: flex;
+  align-items: center;
+}
+
+.kpi-card.kpi-warning .kpi-icon { opacity: 0.5; color: var(--warning); }
+.kpi-card.kpi-success .kpi-icon { opacity: 0.5; color: var(--success); }
 
 .kpi-label {
   font-size: 11px;
@@ -957,6 +972,11 @@ a { text-decoration: none; color: inherit; }
 
 .kpi-card.kpi-warning .kpi-value { color: var(--warning); }
 .kpi-card.kpi-success .kpi-value { color: var(--success); }
+
+/* Role request status card: all fields in one row */
+.profile-card-role-status .info-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
 
 .filters-row {
   display: grid;
