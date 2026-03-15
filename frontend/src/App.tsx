@@ -564,6 +564,7 @@ function AuthPage({
   const [resetEmail, setResetEmail] = useState('')
   const [resetOtp, setResetOtp] = useState('')
   const [resetNewPassword, setResetNewPassword] = useState('')
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('')
   const [otpSentTo, setOtpSentTo] = useState('')
   const [resendCooldown, setResendCooldown] = useState(0)
 
@@ -633,6 +634,10 @@ function AuthPage({
       pushToast('error', 'Use a stronger password: at least 8 characters with letters and numbers')
       return
     }
+    if (resetNewPassword !== resetConfirmPassword) {
+      pushToast('error', 'New password and confirm password do not match')
+      return
+    }
 
     setResetBusy(true)
     try {
@@ -647,6 +652,7 @@ function AuthPage({
       setResetStep('request')
       setResetOtp('')
       setResetNewPassword('')
+      setResetConfirmPassword('')
       setOtpSentTo('')
       setResendCooldown(0)
       setMode('login')
@@ -796,10 +802,6 @@ function AuthPage({
             </button>
           </div>
 
-          {mode === 'signup' && (
-            <div className="auth-step-chip">{signupStep === 'request' ? 'Step 1 of 2: Request OTP' : 'Step 2 of 2: Verify OTP'}</div>
-          )}
-
           <form onSubmit={submit}>
             {mode === 'signup' && (
               <div className="form-field">
@@ -829,6 +831,11 @@ function AuthPage({
               <div className="form-field">
                 <label className="form-field-label">Confirm Password</label>
                 <input className="form-input" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter password" required minLength={8} />
+                {confirmPassword && (
+                  <p className={password === confirmPassword ? 'password-match' : 'password-mismatch'}>
+                    {password === confirmPassword ? '✓ Passwords match' : '✗ Passwords do not match'}
+                  </p>
+                )}
                 <p className="password-help">Use at least 8 characters and include both letters and numbers.</p>
               </div>
             )}
@@ -897,6 +904,7 @@ function AuthPage({
                 setResetStep('request')
                 setResetOtp('')
                 setResetNewPassword('')
+                setResetConfirmPassword('')
                 setResetEmail(email)
                 setOtpSentTo('')
                 setResendCooldown(0)
@@ -922,6 +930,15 @@ function AuthPage({
                       <label className="form-field-label">New Password</label>
                       <input className="form-input" type="password" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} minLength={8} required />
                       <p className="password-help">Use at least 8 characters and include both letters and numbers.</p>
+                    </div>
+                    <div className="form-field">
+                      <label className="form-field-label">Confirm New Password</label>
+                      <input className="form-input" type="password" value={resetConfirmPassword} onChange={(e) => setResetConfirmPassword(e.target.value)} minLength={8} required />
+                      {resetConfirmPassword && (
+                        <p className={resetNewPassword === resetConfirmPassword ? 'password-match' : 'password-mismatch'}>
+                          {resetNewPassword === resetConfirmPassword ? '✓ Passwords match' : '✗ Passwords do not match'}
+                        </p>
+                      )}
                     </div>
                   </>
                 )}
