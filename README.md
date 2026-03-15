@@ -168,9 +168,3 @@ Notifications:
 
 - Email: `demo@coreinventory.app`
 - Password: `demo12345`
-
-## Notes
-
-- All secrets and credentials must be provided via environment variables — never commit `.env` files.
-- See `DEPLOYMENT.md` for the full list of required and optional environment variables.
-- Demo credentials above are valid for the live Render deployment only.
