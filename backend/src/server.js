@@ -709,6 +709,8 @@ app.delete('/api/admin/users/:id', requireAuth, requireRole(ADMIN_ROLES), async 
       }
     }
 
+    await db.run('UPDATE Operations SET created_by = NULL WHERE created_by = ?', userId)
+    await db.run('UPDATE Signup_Verifications SET reviewed_by = NULL WHERE reviewed_by = ?', userId)
     await db.run('DELETE FROM Users WHERE id = ?', userId)
 
     // Audit trail
@@ -729,7 +731,7 @@ app.delete('/api/admin/users/:id', requireAuth, requireRole(ADMIN_ROLES), async 
 
     return res.json({ message: `User ${targetUser.name} has been deleted.` })
   } catch (error) {
-    return res.status(500).json({ message: 'Failed to delete user' })
+    return res.status(500).json({ message: 'Failed to delete user', detail: error && error.message ? error.message : String(error) })
   }
 })
 
@@ -749,6 +751,122 @@ app.get('/api/admin/role-audit-log', requireAuth, requireRole(ADMIN_ROLES), asyn
     return res.json(rows)
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load audit log' })
+  }
+})
+
+app.get('/api/notifications', requireAuth, async (req, res) => {
+  const db = await getDb()
+  const role = String(req.user.role || '').trim().toLowerCase()
+  const isAdmin = role === 'admin'
+  const isManager = role === 'manager'
+  const isElevated = isAdmin || isManager
+
+  const notifications = []
+
+  try {
+    // ── All users: own role request status ──────────────────────
+    const ownRequest = await db.get(
+      `SELECT status, role AS requested_role, created_at
+       FROM Signup_Verifications
+       WHERE LOWER(email) = LOWER(?)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      String(req.user.email).toLowerCase().trim(),
+    )
+    if (ownRequest) {
+      const s = String(ownRequest.status || '').toUpperCase()
+      if (s === 'AWAITING_ADMIN_APPROVAL' || s === 'PENDING' || s === 'PENDING_ADMIN_APPROVAL') {
+        notifications.push({
+          id: 'role-pending',
+          kind: 'info',
+          title: 'Role request pending',
+          message: `Your request for ${ownRequest.requested_role} is awaiting admin approval.`,
+          link: '/profile',
+        })
+      } else if (s === 'APPROVED') {
+        notifications.push({
+          id: 'role-approved',
+          kind: 'success',
+          title: 'Role request approved',
+          message: `Your ${ownRequest.requested_role} role has been approved.`,
+          link: '/profile',
+        })
+      } else if (s === 'REJECTED') {
+        notifications.push({
+          id: 'role-rejected',
+          kind: 'warning',
+          title: 'Role request rejected',
+          message: `Your request for ${ownRequest.requested_role} was rejected.`,
+          link: '/profile',
+        })
+      }
+    }
+
+    // ── Admin: pending role approval requests ───────────────────
+    if (isAdmin) {
+      const pendingRoleRequests = await db.get(
+        `SELECT COUNT(*) AS count FROM Signup_Verifications
+         WHERE UPPER(COALESCE(status,'')) = ANY(?)`,
+        Array.from(PENDING_ROLE_REQUEST_STATUSES),
+      )
+      const pendingCount = Number(pendingRoleRequests?.count || 0)
+      if (pendingCount > 0) {
+        notifications.push({
+          id: 'admin-pending-roles',
+          kind: 'warning',
+          title: `${pendingCount} pending role request${pendingCount > 1 ? 's' : ''}`,
+          message: 'Users are waiting for role approval.',
+          link: '/profile',
+        })
+      }
+    }
+
+    // ── Elevated: low stock alerts ──────────────────────────────
+    if (isElevated) {
+      const lowStockItems = await db.all(
+        `SELECT p.name, COALESCE(SUM(sq.quantity), 0) AS stock, p.reorder_minimum
+         FROM Products p
+         LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
+         GROUP BY p.id, p.name, p.reorder_minimum
+         HAVING p.reorder_minimum > 0 AND COALESCE(SUM(sq.quantity), 0) <= p.reorder_minimum
+         ORDER BY stock ASC
+         LIMIT 10`,
+      )
+      for (const item of lowStockItems) {
+        const stock = Number(item.stock)
+        const isOut = stock <= 0
+        notifications.push({
+          id: `low-stock-${item.name}`,
+          kind: isOut ? 'error' : 'warning',
+          title: isOut ? `Out of stock: ${item.name}` : `Low stock: ${item.name}`,
+          message: isOut
+            ? `${item.name} is completely out of stock.`
+            : `Only ${stock} units left (reorder at ${item.reorder_minimum}).`,
+          link: '/products',
+        })
+      }
+    }
+
+    // ── Elevated: operations waiting/ready to process ───────────
+    if (isElevated) {
+      const pendingOps = await db.get(
+        `SELECT COUNT(*) AS count FROM Operations WHERE status IN ('Waiting', 'Ready')`,
+      )
+      const opCount = Number(pendingOps?.count || 0)
+      if (opCount > 0) {
+        notifications.push({
+          id: 'pending-ops',
+          kind: 'info',
+          title: `${opCount} operation${opCount > 1 ? 's' : ''} pending`,
+          message: `${opCount} operation${opCount > 1 ? 's are' : ' is'} waiting to be processed.`,
+          link: '/operations/receipts',
+        })
+      }
+    }
+
+    return res.json(notifications)
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to load notifications' })
   }
 })
 

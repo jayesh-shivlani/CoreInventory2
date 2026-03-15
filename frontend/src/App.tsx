@@ -118,6 +118,14 @@ type RoleAuditEntry = {
   created_at: string
 }
 
+type NotificationItem = {
+  id: string
+  kind: 'success' | 'warning' | 'error' | 'info'
+  title: string
+  message: string
+  link: string
+}
+
 type Toast = {
   id: number
   kind: 'success' | 'error' | 'info'
@@ -335,6 +343,39 @@ function ProtectedLayout({
   onLogout: () => void
   currentUser: UserProfile | null
 }) {
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const notifRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!token) return
+    const load = async () => {
+      try {
+        const data = await apiRequest<NotificationItem[]>('/notifications', 'GET', token)
+        setNotifications(Array.isArray(data) ? data : [])
+      } catch {
+        // non-fatal
+      }
+    }
+    void load()
+    const timer = setInterval(load, LIVE_SYNC_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [token])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const visibleNotifs = notifications.filter((n) => !dismissed.has(n.id))
+  const unreadCount = visibleNotifs.length
   const location = useLocation()
   if (!token) {
     return <Navigate to="/auth" replace />
@@ -422,7 +463,52 @@ function ProtectedLayout({
               </span>
             ))}
           </div>
-          <div className="topbar-role-chip">{currentUser?.role ?? 'Loading role...'}</div>
+          <div className="topbar-right">
+            <div className="notif-wrapper" ref={notifRef}>
+              <button
+                type="button"
+                className="notif-bell"
+                aria-label="Notifications"
+                onClick={() => setNotifOpen((o) => !o)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                {unreadCount > 0 && (
+                  <span className="notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
+                )}
+              </button>
+              {notifOpen && (
+                <div className="notif-dropdown">
+                  <div className="notif-dropdown-head">
+                    <span>Notifications</span>
+                    {visibleNotifs.length > 0 && (
+                      <button type="button" className="notif-clear-all" onClick={() => { setDismissed(new Set(notifications.map((n) => n.id))); setNotifOpen(false) }}>
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                  {visibleNotifs.length === 0 ? (
+                    <div className="notif-empty">You're all caught up!</div>
+                  ) : (
+                    <ul className="notif-list">
+                      {visibleNotifs.map((n) => (
+                        <li key={n.id} className={`notif-item notif-${n.kind}`}>
+                          <div className="notif-item-body">
+                            <div className="notif-item-title">{n.title}</div>
+                            <div className="notif-item-msg">{n.message}</div>
+                          </div>
+                          <div className="notif-item-actions">
+                            <a className="notif-view-link" href={n.link} onClick={() => setNotifOpen(false)}>View</a>
+                            <button type="button" className="notif-dismiss" aria-label="Dismiss" onClick={() => setDismissed((prev) => new Set([...prev, n.id]))}>×</button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="topbar-role-chip">{currentUser?.role ?? 'Loading role...'}</div>
+          </div>
         </header>
         <div className="page-content">
           <Outlet />
