@@ -1,3 +1,7 @@
+# Key Note 
+
+I have updated the website later after uploading the video and add many meaningful changes to website, so please make sure to checkout the website
+
 # Core Inventory IMS
 
 A full-stack inventory management system for product cataloging, warehouse stock control, and internal logistics operations.
