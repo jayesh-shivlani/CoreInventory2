@@ -3,7 +3,7 @@ const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
 const dns = require('dns').promises
-const { Resend } = require('resend')
+const nodemailer = require('nodemailer')
 const fs = require('fs')
 const path = require('path')
 const { buildReference, ensureLocationByName, getDb, initDb } = require('./db')
@@ -14,8 +14,8 @@ const PORT = Number(process.env.PORT || 4000)
 
 const OTP_TTL_MINUTES = Number(process.env.SIGNUP_OTP_TTL_MINUTES || 10)
 const RESET_OTP_TTL_MINUTES = Number(process.env.RESET_OTP_TTL_MINUTES || 10)
-const RESEND_TIMEOUT_MS = Number(process.env.RESEND_TIMEOUT_MS || 15000)
-const RESEND_MAX_ATTEMPTS = Math.max(1, Number(process.env.RESEND_MAX_ATTEMPTS || 2))
+const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 15000)
+const SMTP_MAX_ATTEMPTS = Math.max(1, Number(process.env.SMTP_MAX_ATTEMPTS || 2))
 const STRICT_EMAIL_DOMAIN_CHECK = String(process.env.STRICT_EMAIL_DOMAIN_CHECK || 'false').toLowerCase() === 'true'
 const EXPOSE_DEV_OTP =
   process.env.NODE_ENV !== 'production' &&
@@ -24,6 +24,9 @@ const ALLOWED_SIGNUP_ROLES = ['Warehouse Staff', 'Manager']
 const ADMIN_ROLES = ['Admin']
 const MANAGER_ROLES = ['Manager', 'Admin']
 const PENDING_ROLE_REQUEST_STATUSES = new Set(['AWAITING_ADMIN_APPROVAL', 'PENDING', 'PENDING_ADMIN_APPROVAL'])
+
+let smtpTransporter = null
+let smtpVerified = false
 
 function isPendingRoleRequestStatus(status) {
   return PENDING_ROLE_REQUEST_STATUSES.has(String(status || '').trim().toUpperCase())
@@ -57,28 +60,28 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function withTimeout(promise, timeoutMs) {
+function withTimeout(promise, timeoutMs, timeoutLabel = 'Request timed out') {
   return Promise.race([
     promise,
     new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Resend request timed out after ${timeoutMs}ms`)), timeoutMs)
+      setTimeout(() => reject(new Error(`${timeoutLabel} after ${timeoutMs}ms`)), timeoutMs)
     }),
   ])
 }
 
-function isRetryableResendError(error) {
+function isRetryableSmtpError(error) {
   const msg = String(error?.message || '').toLowerCase()
+  const code = String(error?.code || '').toLowerCase()
   return (
+    code === 'etimedout' ||
+    code === 'econnreset' ||
+    code === 'econnrefused' ||
+    code === 'eai_again' ||
     msg.includes('timed out') ||
     msg.includes('timeout') ||
-    msg.includes('rate limit') ||
-    msg.includes('too many requests') ||
-    msg.includes('429') ||
-    msg.includes('500') ||
-    msg.includes('502') ||
-    msg.includes('503') ||
-    msg.includes('504') ||
     msg.includes('econnreset') ||
+    msg.includes('econnrefused') ||
+    msg.includes('etimedout') ||
     msg.includes('eai_again')
   )
 }
@@ -86,62 +89,109 @@ function isRetryableResendError(error) {
 function toOtpDeliveryMessage(error) {
   const msg = String(error?.message || '')
   const lower = msg.toLowerCase()
+  const code = String(error?.code || '').toLowerCase()
 
-  if (lower.includes('testing emails to your own email address')) {
-    return 'Resend is in test mode. OTP can be sent only to your own verified email. Verify a domain in Resend to send OTP to all users.'
+  if (lower.includes('smtp is not configured')) {
+    return 'Email service is not configured. Please contact support.'
   }
 
-  if (lower.includes('domain is not verified')) {
-    return 'Resend sender domain is not verified. Use onboarding@resend.dev or verify your sending domain in Resend.'
+  if (code === 'eauth' || lower.includes('invalid login') || lower.includes('username and password not accepted')) {
+    return 'Gmail authentication failed. Use SMTP_USER as your Gmail address and SMTP_PASS as a valid Gmail app password.'
   }
 
-  if (lower.includes('invalid api key') || lower.includes('unauthorized') || lower.includes('401')) {
-    return 'Resend API key is invalid. Update RESEND_API_KEY in deployment settings.'
+  if (code === 'etimedout' || code === 'econnrefused' || lower.includes('connection timeout')) {
+    return 'Could not connect to Gmail SMTP from the server. Please try again shortly.'
   }
 
   return 'OTP email service is unavailable right now. Please try again.'
 }
 
-async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
-  const from = process.env.FROM_EMAIL || 'onboarding@resend.dev'
-  const resendKey = process.env.RESEND_API_KEY
-  const isProduction = process.env.NODE_ENV === 'production'
+function buildSmtpTransporter() {
+  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com'
+  const smtpPort = Number(process.env.SMTP_PORT || 587)
+  const smtpUser = process.env.SMTP_USER
+  const smtpPass = process.env.SMTP_PASS
 
-  if (!resendKey) {
+  if (!smtpUser || !smtpPass) {
+    return null
+  }
+
+  return nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    requireTLS: smtpPort !== 465,
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+  })
+}
+
+async function getVerifiedSmtpTransporter() {
+  if (!smtpTransporter) {
+    smtpTransporter = buildSmtpTransporter()
+  }
+
+  if (!smtpTransporter) {
+    return null
+  }
+
+  if (!smtpVerified) {
+    await withTimeout(
+      smtpTransporter.verify(),
+      SMTP_TIMEOUT_MS,
+      'SMTP verify timed out',
+    )
+    smtpVerified = true
+  }
+
+  return smtpTransporter
+}
+
+async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
+  const from = process.env.FROM_EMAIL || process.env.SMTP_USER || 'coreinventory.support@gmail.com'
+  const isProduction = process.env.NODE_ENV === 'production'
+  let smtpError = null
+
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     if (isProduction) {
-      throw new Error('RESEND_API_KEY is not configured')
+      throw new Error('SMTP is not configured')
     }
     console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
     return { delivered: false }
   }
 
-  const resend = new Resend(resendKey)
-  let resendError = null
-
-  for (let attempt = 1; attempt <= RESEND_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= SMTP_MAX_ATTEMPTS; attempt += 1) {
     try {
-      const response = await withTimeout(
-        resend.emails.send({
-          from: from.includes('@') ? from : `Core Inventory <${from}>`,
+      const transporter = await getVerifiedSmtpTransporter()
+      if (!transporter) {
+        throw new Error('SMTP is not configured')
+      }
+
+      await withTimeout(
+        transporter.sendMail({
+          from,
           to: toEmail,
           subject: `Core Inventory OTP for ${purpose}`,
           text: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
           html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
         }),
-        RESEND_TIMEOUT_MS,
+        SMTP_TIMEOUT_MS,
+        'SMTP send timed out',
       )
-
-      if (response?.error) {
-        console.error('Resend returned an error:', response.error)
-        throw new Error(response.error.message || 'Email sending failed via Resend')
-      }
 
       return { delivered: true }
     } catch (error) {
-      resendError = error
-      console.error(`Resend email attempt ${attempt}/${RESEND_MAX_ATTEMPTS} failed:`, error)
+      smtpError = error
+      smtpVerified = false
+      smtpTransporter = null
+      console.error(`SMTP email attempt ${attempt}/${SMTP_MAX_ATTEMPTS} failed:`, error)
 
-      const shouldRetry = attempt < RESEND_MAX_ATTEMPTS && isRetryableResendError(error)
+      const shouldRetry = attempt < SMTP_MAX_ATTEMPTS && isRetryableSmtpError(error)
       if (shouldRetry) {
         await sleep(400 * attempt)
         continue
@@ -156,7 +206,7 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
     return { delivered: false }
   }
 
-  throw resendError || new Error('Email service failed to deliver OTP')
+  throw smtpError || new Error('Email service failed to deliver OTP')
 }
 
 const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || '')

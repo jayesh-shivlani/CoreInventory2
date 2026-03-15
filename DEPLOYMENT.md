@@ -29,19 +29,22 @@ Auto-provisioned in blueprint:
 - `JWT_SECRET` (generated)
 - `FRONTEND_DIST_PATH=../frontend/dist`
 
-Email/OTP variables (Resend-only):
+Email/OTP variables (Gmail SMTP):
 
-- `RESEND_API_KEY`
-- `FROM_EMAIL` (default `onboarding@resend.dev`)
-- `RESEND_TIMEOUT_MS` (default `15000`)
-- `RESEND_MAX_ATTEMPTS` (default `2`)
+- `SMTP_HOST` (use `smtp.gmail.com`)
+- `SMTP_PORT` (use `587`)
+- `SMTP_USER` (your Gmail address)
+- `SMTP_PASS` (Gmail app password)
+- `FROM_EMAIL` (typically same as `SMTP_USER`)
+- `SMTP_TIMEOUT_MS` (default `15000`)
+- `SMTP_MAX_ATTEMPTS` (default `2`)
 - `SIGNUP_OTP_TTL_MINUTES`
 - `RESET_OTP_TTL_MINUTES`
 
 Notes:
 
-- For unrestricted recipient sending, verify a sending domain in Resend and set `FROM_EMAIL` to that domain.
-- In Resend sandbox/test mode, OTP can only be sent to your own verified email address.
+- Enable Google 2-Step Verification, then generate and use an App Password for `SMTP_PASS`.
+- Regular Gmail account password will not work for SMTP.
 
 ## Build and Start
 
