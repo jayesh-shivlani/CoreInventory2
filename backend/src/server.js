@@ -57,10 +57,13 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
   const smtpPort = Number(process.env.SMTP_PORT || 465)
   const smtpUser = process.env.SMTP_USER
   const smtpPass = process.env.SMTP_PASS
+  const smtpTimeoutMs = Number(process.env.SMTP_TIMEOUT_MS || 12000)
+  const brevoApiKey = process.env.BREVO_API_KEY
   const from = process.env.FROM_EMAIL || smtpUser || 'onboarding@resend.dev'
   const isProduction = process.env.NODE_ENV === 'production'
 
   let smtpError = null
+  let brevoError = null
   let resendError = null
 
   if (smtpHost && smtpUser && smtpPass) {
@@ -69,6 +72,9 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
         host: smtpHost,
         port: smtpPort,
         secure: smtpPort === 465,
+        connectionTimeout: smtpTimeoutMs,
+        greetingTimeout: smtpTimeoutMs,
+        socketTimeout: smtpTimeoutMs,
         auth: {
           user: smtpUser,
           pass: smtpPass,
@@ -90,12 +96,60 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
     }
   }
 
+  if (brevoApiKey) {
+    try {
+      let senderEmail = from
+      let senderName = 'Core Inventory'
+      const senderMatch = String(from).match(/^\s*(.*?)\s*<\s*([^>]+)\s*>\s*$/)
+      if (senderMatch) {
+        senderName = senderMatch[1] || senderName
+        senderEmail = senderMatch[2]
+      }
+
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 15000)
+
+      try {
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': brevoApiKey,
+          },
+          body: JSON.stringify({
+            sender: { email: senderEmail, name: senderName },
+            to: [{ email: toEmail }],
+            subject: `Core Inventory OTP for ${purpose}`,
+            textContent: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
+            htmlContent: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
+          }),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          const errorBody = await response.text()
+          throw new Error(`Brevo API ${response.status}: ${errorBody}`)
+        }
+
+        return { delivered: true }
+      } finally {
+        clearTimeout(timeout)
+      }
+    } catch (error) {
+      console.error('Brevo API email sending failed:', error)
+      brevoError = error
+    }
+  }
+
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) {
     if (isProduction) {
-      const reason = smtpError
-        ? `SMTP failed and RESEND_API_KEY is not configured`
-        : 'No email provider configured (missing SMTP config and RESEND_API_KEY)'
+      const failureReasons = []
+      if (smtpError) failureReasons.push('SMTP failed')
+      if (brevoError) failureReasons.push('Brevo API failed')
+      const reason = failureReasons.length > 0
+        ? `${failureReasons.join(' and ')} and RESEND_API_KEY is not configured`
+        : 'No email provider configured (missing SMTP config, BREVO_API_KEY, and RESEND_API_KEY)'
       throw new Error(reason)
     }
     console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
@@ -130,6 +184,9 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
     const details = []
     if (smtpError) {
       details.push(`SMTP failed: ${smtpError.message || String(smtpError)}`)
+    }
+    if (brevoError) {
+      details.push(`Brevo API failed: ${brevoError.message || String(brevoError)}`)
     }
     details.push(`Resend failed: ${resendError.message || String(resendError)}`)
 
