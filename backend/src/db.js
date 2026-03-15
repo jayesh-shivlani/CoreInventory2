@@ -81,6 +81,9 @@ function buildReference(type, id) {
 
 async function initDb() {
   const db = await getDb()
+  const DEFAULT_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'jayeshshivlani23@gmail.com').toLowerCase().trim()
+  const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'jay123'
+  const DEFAULT_ADMIN_NAME = process.env.ADMIN_NAME || 'Jayesh Shivlani'
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS Users (
@@ -99,8 +102,12 @@ async function initDb() {
       name TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'Warehouse Staff',
+      status TEXT NOT NULL DEFAULT 'OTP_PENDING',
       otp_code TEXT NOT NULL,
       otp_expires_at TIMESTAMP NOT NULL,
+      reviewed_by INTEGER,
+      reviewed_at TIMESTAMP,
+      review_note TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -239,6 +246,10 @@ async function initDb() {
     await db.exec('ALTER TABLE Operation_Lines ADD COLUMN IF NOT EXISTS picked_quantity NUMERIC NOT NULL DEFAULT 0')
     await db.exec('ALTER TABLE Operation_Lines ADD COLUMN IF NOT EXISTS packed_quantity NUMERIC NOT NULL DEFAULT 0')
     await db.exec('ALTER TABLE Users ADD COLUMN IF NOT EXISTS reset_otp_expires_at TIMESTAMP')
+    await db.exec("ALTER TABLE Signup_Verifications ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'OTP_PENDING'")
+    await db.exec('ALTER TABLE Signup_Verifications ADD COLUMN IF NOT EXISTS reviewed_by INTEGER')
+    await db.exec('ALTER TABLE Signup_Verifications ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP')
+    await db.exec('ALTER TABLE Signup_Verifications ADD COLUMN IF NOT EXISTS review_note TEXT')
   } catch (err) {
     console.log('Migration note: Stock_Ledger columns check done.')
   }
@@ -252,6 +263,27 @@ async function initDb() {
       'demo@coreinventory.app',
       hashed,
       'Manager',
+    )
+  }
+
+  const existingAdmin = await db.get('SELECT id FROM Users WHERE email = ?', DEFAULT_ADMIN_EMAIL)
+  const adminHash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10)
+
+  if (!existingAdmin) {
+    await db.run(
+      'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
+      DEFAULT_ADMIN_NAME,
+      DEFAULT_ADMIN_EMAIL,
+      adminHash,
+      'Admin',
+    )
+  } else {
+    await db.run(
+      'UPDATE Users SET name = ?, password_hash = ?, role = ? WHERE id = ?',
+      DEFAULT_ADMIN_NAME,
+      adminHash,
+      'Admin',
+      existingAdmin.id,
     )
   }
 

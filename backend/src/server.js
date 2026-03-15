@@ -19,7 +19,14 @@ const STRICT_EMAIL_DOMAIN_CHECK = String(process.env.STRICT_EMAIL_DOMAIN_CHECK |
 const EXPOSE_DEV_OTP =
   process.env.NODE_ENV !== 'production' &&
   String(process.env.EXPOSE_DEV_OTP || 'true').toLowerCase() === 'true'
+const ALLOWED_SIGNUP_ROLES = ['Warehouse Staff', 'Manager']
+const ADMIN_ROLES = ['Admin']
 const MANAGER_ROLES = ['Manager', 'Admin']
+const PENDING_ROLE_REQUEST_STATUSES = new Set(['AWAITING_ADMIN_APPROVAL', 'PENDING', 'PENDING_ADMIN_APPROVAL'])
+
+function isPendingRoleRequestStatus(status) {
+  return PENDING_ROLE_REQUEST_STATUSES.has(String(status || '').trim().toUpperCase())
+}
 
 function isValidEmailFormat(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
@@ -180,7 +187,8 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const normalizedName = String(name).trim()
-    const normalizedRole = role && typeof role === 'string' ? role : 'Warehouse Staff'
+    const requestedRole = role && typeof role === 'string' ? String(role).trim() : 'Warehouse Staff'
+    const normalizedRole = ALLOWED_SIGNUP_ROLES.includes(requestedRole) ? requestedRole : 'Warehouse Staff'
 
     if (!otp) {
       const generatedOtp = String(Math.floor(100000 + Math.random() * 900000))
@@ -189,15 +197,19 @@ app.post('/api/auth/register', async (req, res) => {
 
       await db.run(
         `
-          INSERT INTO Signup_Verifications (email, name, password_hash, role, otp_code, otp_expires_at, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          INSERT INTO Signup_Verifications (email, name, password_hash, role, status, otp_code, otp_expires_at, created_at)
+          VALUES (?, ?, ?, ?, 'OTP_PENDING', ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT (email)
           DO UPDATE SET
             name = EXCLUDED.name,
             password_hash = EXCLUDED.password_hash,
             role = EXCLUDED.role,
+            status = 'OTP_PENDING',
             otp_code = EXCLUDED.otp_code,
             otp_expires_at = EXCLUDED.otp_expires_at,
+            reviewed_by = NULL,
+            reviewed_at = NULL,
+            review_note = NULL,
             created_at = CURRENT_TIMESTAMP
         `,
         normalizedEmail,
@@ -221,12 +233,20 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const pending = await db.get(
-      'SELECT id, name, email, password_hash, role, otp_code, otp_expires_at FROM Signup_Verifications WHERE email = ?',
+      'SELECT id, name, email, password_hash, role, status, otp_code, otp_expires_at FROM Signup_Verifications WHERE email = ?',
       normalizedEmail,
     )
 
     if (!pending) {
       return res.status(400).json({ message: 'Please request an OTP first' })
+    }
+
+    if (String(pending.status || '').toUpperCase() === 'AWAITING_ADMIN_APPROVAL') {
+      return res.status(409).json({ message: 'Account already created. Waiting for admin role approval.' })
+    }
+
+    if (String(pending.status || '').toUpperCase() === 'APPROVED') {
+      return res.status(409).json({ message: 'This request was already approved. Please sign in.' })
     }
 
     if (String(otp).trim() !== String(pending.otp_code || '').trim()) {
@@ -242,17 +262,29 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ message: 'OTP expired. Please request a new one.' })
     }
 
+    const existingUser = await db.get('SELECT id FROM Users WHERE email = ?', normalizedEmail)
+    if (!existingUser) {
+      await db.run(
+        'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
+        pending.name,
+        pending.email,
+        pending.password_hash,
+        'Warehouse Staff',
+      )
+    }
+
     await db.run(
-      'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
-      pending.name,
-      pending.email,
-      pending.password_hash,
-      pending.role,
+      `
+        UPDATE Signup_Verifications
+        SET status = 'AWAITING_ADMIN_APPROVAL', otp_code = NULL
+        WHERE email = ?
+      `,
+      normalizedEmail,
     )
 
-    await db.run('DELETE FROM Signup_Verifications WHERE email = ?', normalizedEmail)
-
-    return res.status(201).json({ message: 'Registered successfully' })
+    return res.status(201).json({
+      message: 'Account created with default access. Your requested role was sent to admin for one-time approval.',
+    })
   } catch (error) {
     return res.status(500).json({ message: 'Registration failed' })
   }
@@ -344,6 +376,196 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 app.get('/api/users/me', requireAuth, async (req, res) => {
   res.json(req.user)
+})
+
+app.get('/api/users/role-request-status', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb()
+    const latest = await db.get(
+      `
+        SELECT
+          role,
+          status,
+          created_at,
+          reviewed_at,
+          review_note
+        FROM Signup_Verifications
+        WHERE email = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      String(req.user.email || '').toLowerCase().trim(),
+    )
+
+    if (!latest) {
+      return res.json({
+        status: 'not_requested',
+        requested_role: null,
+        requested_at: null,
+        reviewed_at: null,
+        review_note: null,
+      })
+    }
+
+    const normalized = String(latest.status || '').trim().toUpperCase()
+    const status = isPendingRoleRequestStatus(normalized)
+      ? 'pending'
+      : normalized === 'APPROVED'
+        ? 'completed'
+        : normalized === 'REJECTED'
+          ? 'rejected'
+          : 'pending'
+
+    return res.json({
+      status,
+      requested_role: latest.role || null,
+      requested_at: latest.created_at || null,
+      reviewed_at: latest.reviewed_at || null,
+      review_note: latest.review_note || null,
+    })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to load role request status' })
+  }
+})
+
+app.get('/api/admin/role-requests', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  try {
+    const scope = String(req.query.scope || 'pending').trim().toLowerCase()
+    const showAll = scope === 'all'
+    const db = await getDb()
+    const rows = showAll
+      ? await db.all(
+          `
+            SELECT
+              sv.id,
+              sv.name,
+              sv.email,
+              sv.role AS requested_role,
+              sv.status,
+              sv.created_at,
+              sv.reviewed_at,
+              sv.review_note,
+              u.name AS reviewed_by_name
+            FROM Signup_Verifications sv
+            LEFT JOIN Users u ON u.id = sv.reviewed_by
+            ORDER BY sv.created_at DESC
+          `,
+        )
+      : await db.all(
+          `
+            SELECT
+              sv.id,
+              sv.name,
+              sv.email,
+              sv.role AS requested_role,
+              sv.status,
+              sv.created_at,
+              sv.reviewed_at,
+              sv.review_note,
+              u.name AS reviewed_by_name
+            FROM Signup_Verifications sv
+            LEFT JOIN Users u ON u.id = sv.reviewed_by
+            WHERE UPPER(COALESCE(sv.status, '')) = ANY(?)
+            ORDER BY sv.created_at ASC
+          `,
+          Array.from(PENDING_ROLE_REQUEST_STATUSES),
+        )
+
+    return res.json(rows)
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to load role requests' })
+  }
+})
+
+app.post('/api/admin/role-requests/:id/approve', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  const requestId = Number(req.params.id)
+  if (!Number.isFinite(requestId)) {
+    return res.status(400).json({ message: 'Invalid request id' })
+  }
+
+  const db = await getDb()
+  try {
+    const pending = await db.get('SELECT * FROM Signup_Verifications WHERE id = ?', requestId)
+    if (!pending) {
+      return res.status(404).json({ message: 'Role request not found' })
+    }
+
+    if (!isPendingRoleRequestStatus(pending.status)) {
+      return res.status(400).json({ message: 'Role request is not pending admin approval' })
+    }
+
+    const existingUser = await db.get('SELECT id FROM Users WHERE email = ?', String(pending.email).toLowerCase().trim())
+
+    await db.exec('BEGIN')
+    try {
+      if (!existingUser) {
+        await db.run(
+          'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
+          pending.name,
+          String(pending.email).toLowerCase().trim(),
+          pending.password_hash,
+          pending.role,
+        )
+      } else {
+        await db.run('UPDATE Users SET role = ? WHERE id = ?', pending.role, existingUser.id)
+      }
+
+      await db.run(
+        `
+          UPDATE Signup_Verifications
+          SET status = 'APPROVED', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?
+          WHERE id = ?
+        `,
+        req.user.id,
+        `Approved for role ${pending.role}`,
+        requestId,
+      )
+
+      await db.exec('COMMIT')
+      return res.json({ message: `Role request approved. User can now access ${pending.role} permissions.` })
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to approve role request' })
+  }
+})
+
+app.post('/api/admin/role-requests/:id/reject', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  const requestId = Number(req.params.id)
+  if (!Number.isFinite(requestId)) {
+    return res.status(400).json({ message: 'Invalid request id' })
+  }
+
+  const reviewNote = String(req.body?.note || 'Rejected by admin').trim()
+  const db = await getDb()
+
+  try {
+    const pending = await db.get('SELECT id, status FROM Signup_Verifications WHERE id = ?', requestId)
+    if (!pending) {
+      return res.status(404).json({ message: 'Role request not found' })
+    }
+
+    if (!isPendingRoleRequestStatus(pending.status)) {
+      return res.status(400).json({ message: 'Role request is not pending admin approval' })
+    }
+
+    await db.run(
+      `
+        UPDATE Signup_Verifications
+        SET status = 'REJECTED', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?
+        WHERE id = ?
+      `,
+      req.user.id,
+      reviewNote,
+      requestId,
+    )
+
+    return res.json({ message: 'Role request rejected' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to reject role request' })
+  }
 })
 
 app.get('/api/locations', requireAuth, async (req, res) => {

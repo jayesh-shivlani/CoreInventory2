@@ -78,6 +78,26 @@ type UserProfile = {
   role: string
 }
 
+type AdminRoleRequest = {
+  id: number
+  name: string
+  email: string
+  requested_role: string
+  status: string
+  created_at: string
+  reviewed_at?: string
+  review_note?: string
+  reviewed_by_name?: string
+}
+
+type UserRoleRequestStatus = {
+  status: 'not_requested' | 'pending' | 'rejected' | 'completed'
+  requested_role: string | null
+  requested_at: string | null
+  reviewed_at: string | null
+  review_note: string | null
+}
+
 type Toast = {
   id: number
   kind: 'success' | 'error' | 'info'
@@ -102,6 +122,7 @@ const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
 const LIVE_SYNC_INTERVAL_MS = 8000
 const DEFAULT_UOMS = ['Units', 'Kg', 'L', 'Box', 'Pack', 'Piece']
 const DEFAULT_CATEGORIES = ['Raw Materials', 'Finished Goods', 'Consumables', 'Electronics', 'Hardware']
+const AUTH_INVALID_EVENT = 'ims-auth-invalid'
 
 const toOperationKind = (path: string): OperationKind => {
   if (path.includes('receipts')) return 'Receipt'
@@ -147,6 +168,11 @@ async function apiRequest<T>(
     const message =
       (body as { message?: string } | null)?.message ??
       `Request failed (${response.status})`
+
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { message } }))
+    }
+
     throw new Error(message)
   }
 
@@ -155,7 +181,38 @@ async function apiRequest<T>(
 
 function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
+
+  useEffect(() => {
+    if (!token) {
+      setCurrentUser(null)
+      return
+    }
+
+    let active = true
+
+    const loadCurrentUser = async () => {
+      try {
+        const profile = await apiRequest<UserProfile>('/users/me', 'GET', token)
+        if (active) {
+          setCurrentUser(profile)
+        }
+      } catch {
+        if (active) {
+          setCurrentUser(null)
+        }
+      }
+    }
+
+    loadCurrentUser()
+    const timer = setInterval(loadCurrentUser, LIVE_SYNC_INTERVAL_MS)
+
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [token])
 
   const pushToast = (kind: Toast['kind'], text: string) => {
     const next = { id: Date.now() + Math.floor(Math.random() * 1000), kind, text }
@@ -173,8 +230,22 @@ function App() {
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
+    setCurrentUser(null)
     pushToast('info', 'Logged out')
   }
+
+  useEffect(() => {
+    const handleAuthInvalid = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      localStorage.removeItem(TOKEN_KEY)
+      setToken(null)
+      setCurrentUser(null)
+      pushToast('error', detail?.message || 'Session expired. Please sign in again.')
+    }
+
+    window.addEventListener(AUTH_INVALID_EVENT, handleAuthInvalid)
+    return () => window.removeEventListener(AUTH_INVALID_EVENT, handleAuthInvalid)
+  }, [])
 
   return (
     <>
@@ -184,30 +255,30 @@ function App() {
           path="/auth"
           element={<AuthPage token={token} onLogin={login} pushToast={pushToast} />}
         />
-        <Route element={<ProtectedLayout token={token} onLogout={logout} />}>
+        <Route element={<ProtectedLayout token={token} onLogout={logout} currentUser={currentUser} />}>
           <Route
             path="/dashboard"
             element={<DashboardPage token={token} pushToast={pushToast} />}
           />
           <Route
             path="/products"
-            element={<ProductsPage token={token} pushToast={pushToast} />}
+            element={<ProductsPage token={token} pushToast={pushToast} currentUser={currentUser} />}
           />
           <Route
             path="/operations/receipts"
-            element={<OperationsPage token={token} pushToast={pushToast} />}
+            element={<OperationsPage token={token} pushToast={pushToast} currentUser={currentUser} />}
           />
           <Route
             path="/operations/deliveries"
-            element={<OperationsPage token={token} pushToast={pushToast} />}
+            element={<OperationsPage token={token} pushToast={pushToast} currentUser={currentUser} />}
           />
           <Route
             path="/operations/transfers"
-            element={<OperationsPage token={token} pushToast={pushToast} />}
+            element={<OperationsPage token={token} pushToast={pushToast} currentUser={currentUser} />}
           />
           <Route
             path="/operations/adjustments"
-            element={<OperationsPage token={token} pushToast={pushToast} />}
+            element={<OperationsPage token={token} pushToast={pushToast} currentUser={currentUser} />}
           />
           <Route
             path="/move-history"
@@ -215,7 +286,7 @@ function App() {
           />
           <Route
             path="/settings/warehouses"
-            element={<WarehousesPage token={token} pushToast={pushToast} />}
+            element={<WarehousesPage token={token} pushToast={pushToast} currentUser={currentUser} />}
           />
           <Route
             path="/profile"
@@ -238,9 +309,11 @@ function App() {
 function ProtectedLayout({
   token,
   onLogout,
+  currentUser,
 }: {
   token: string | null
   onLogout: () => void
+  currentUser: UserProfile | null
 }) {
   const location = useLocation()
   if (!token) {
@@ -329,6 +402,7 @@ function ProtectedLayout({
               </span>
             ))}
           </div>
+          <div className="topbar-role-chip">{currentUser?.role ?? 'Loading role...'}</div>
         </header>
         <div className="page-content">
           <Outlet />
@@ -336,6 +410,20 @@ function ProtectedLayout({
       </div>
     </div>
   )
+}
+
+function hasElevatedAccess(user: UserProfile | null): boolean {
+  const role = String(user?.role || '').trim().toLowerCase()
+  return role === 'admin' || role === 'manager'
+}
+
+function isAdminRole(role: string | undefined | null): boolean {
+  return String(role || '').trim().toLowerCase() === 'admin'
+}
+
+function isPendingRoleRequestStatus(status: string | undefined | null): boolean {
+  const normalized = String(status || '').trim().toUpperCase()
+  return normalized === 'AWAITING_ADMIN_APPROVAL' || normalized === 'PENDING' || normalized === 'PENDING_ADMIN_APPROVAL'
 }
 
 function AuthPage({
@@ -354,6 +442,7 @@ function AuthPage({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [requestedRole, setRequestedRole] = useState<'Warehouse Staff' | 'Manager'>('Warehouse Staff')
   const [signupStep, setSignupStep] = useState<'request' | 'verify'>('request')
   const [signupOtp, setSignupOtp] = useState('')
   const [signupOtpSentTo, setSignupOtpSentTo] = useState('')
@@ -490,6 +579,7 @@ function AuthPage({
             name,
             email,
             password,
+            role: requestedRole,
           })
 
           setSignupStep('verify')
@@ -511,14 +601,16 @@ function AuthPage({
             name,
             email,
             password,
+            role: requestedRole,
             otp: signupOtp,
           })
 
-          pushToast('success', 'Account verified and created. Please sign in.')
+          pushToast('success', 'Account created with default access. You can sign in now. Admin approval is needed only for your requested role.')
           setSignupStep('request')
           setSignupOtp('')
           setSignupOtpSentTo('')
           setSignupResendCooldown(0)
+          setRequestedRole('Warehouse Staff')
           setMode('login')
         }
       }
@@ -565,6 +657,7 @@ function AuthPage({
                 setSignupOtp('')
                 setSignupOtpSentTo('')
                 setSignupResendCooldown(0)
+                setRequestedRole('Warehouse Staff')
               }}
             >
               Create Account
@@ -576,6 +669,15 @@ function AuthPage({
               <div className="form-field">
                 <label className="form-field-label">Full Name</label>
                 <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" required />
+              </div>
+            )}
+            {mode === 'signup' && (
+              <div className="form-field">
+                <label className="form-field-label">Requested Role</label>
+                <select className="form-select" value={requestedRole} onChange={(e) => setRequestedRole(e.target.value as 'Warehouse Staff' | 'Manager')}>
+                  <option value="Warehouse Staff">Warehouse Staff</option>
+                  <option value="Manager">Manager</option>
+                </select>
               </div>
             )}
             <div className="form-field">
@@ -612,6 +714,7 @@ function AuthPage({
                           name,
                           email,
                           password,
+                          role: requestedRole,
                         })
                         setSignupResendCooldown(30)
                         if (response?.dev_otp) {
@@ -919,9 +1022,11 @@ function KpiCard({ label, value, variant }: { label: string; value: number; vari
 function ProductsPage({
   token,
   pushToast,
+  currentUser,
 }: {
   token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
+  currentUser: UserProfile | null
 }) {
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list')
   const [loading, setLoading] = useState(true)
@@ -946,6 +1051,7 @@ function ProductsPage({
   const [uom, setUom] = useState('Units')
   const [initialStock, setInitialStock] = useState('0')
   const [reorderMinimum, setReorderMinimum] = useState('0')
+  const canManageProducts = hasElevatedAccess(currentUser)
 
   const resetForm = () => {
     setEditingProductId(null)
@@ -958,11 +1064,19 @@ function ProductsPage({
   }
 
   const startNew = () => {
+    if (!canManageProducts) {
+      pushToast('info', 'Only admin-approved roles can change products. Please contact admin.')
+      return
+    }
     resetForm()
     setViewMode('form')
   }
 
   const startEdit = (product: Product) => {
+    if (!canManageProducts) {
+      pushToast('info', 'Only admin-approved roles can change products. Please contact admin.')
+      return
+    }
     setEditingProductId(product.id)
     setName(product.name)
     setSku(product.sku)
@@ -1033,6 +1147,10 @@ function ProductsPage({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    if (!canManageProducts) {
+      pushToast('error', 'Only admin-approved roles can change products. Please contact admin.')
+      return
+    }
     if (!name.trim() || !sku.trim() || !category.trim() || !uom.trim()) {
       pushToast('error', 'Name, SKU, category, and unit of measure are required')
       return
@@ -1085,6 +1203,10 @@ function ProductsPage({
 
   const deleteProduct = async () => {
     if (!editingProductId) return
+    if (!canManageProducts) {
+      pushToast('error', 'Only admin-approved roles can change products. Please contact admin.')
+      return
+    }
     if (!window.confirm('Are you sure you want to delete this product?')) return
 
     setSaving(true)
@@ -1157,7 +1279,11 @@ function ProductsPage({
                 <h2>Products</h2>
                 <p>Manage catalog items, monitor stock, and keep reorder levels in control.</p>
               </div>
-              <button type="button" className="btn btn-primary" onClick={startNew}>+ New Product</button>
+              {canManageProducts ? (
+                <button type="button" className="btn btn-primary" onClick={startNew}>+ New Product</button>
+              ) : (
+                <div className="muted">Read-only access. Contact admin to manage products.</div>
+              )}
             </div>
             <div className="product-stats-grid">
               <article className="product-stat-card">
@@ -1232,7 +1358,7 @@ function ProductsPage({
           <div className="list-card product-table-card">
             <div className="list-header">
               <h2>Product List</h2>
-              <p className="muted">Click Edit to open a product.</p>
+              <p className="muted">{canManageProducts ? 'Click Edit to open a product.' : 'Read-only list. Only admin-approved roles can change products.'}</p>
             </div>
           <div className="data-table-wrap">
             <table className="data-table">
@@ -1271,9 +1397,11 @@ function ProductsPage({
                       </span>
                     </td>
                     <td className="product-actions-cell">
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(product)}>
-                        Edit
-                      </button>
+                      {canManageProducts && (
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(product)}>
+                          Edit
+                        </button>
+                      )}
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => { void toggleStockDetails(product.id) }}>
                         {expandedProductId === product.id ? 'Hide Stock' : 'View Stock'}
                       </button>
@@ -1412,9 +1540,11 @@ function ProductsPage({
 function OperationsPage({
   token,
   pushToast,
+  currentUser,
 }: {
   token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
+  currentUser: UserProfile | null
 }) {
   const location = useLocation()
   const operationType = toOperationKind(location.pathname)
@@ -1434,6 +1564,7 @@ function OperationsPage({
   const [lines, setLines] = useState<OperationDraftLine[]>([
     { product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' },
   ])
+  const canDeleteOperations = hasElevatedAccess(currentUser)
 
   const resetDraftForm = () => {
     setLines([{ product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' }])
@@ -1653,6 +1784,10 @@ function OperationsPage({
   }
 
   const deleteOperation = async (id: number) => {
+    if (!canDeleteOperations) {
+      pushToast('error', 'Only admin-approved roles can delete operations. Please contact admin.')
+      return
+    }
     if (!window.confirm('Are you sure you want to delete this operation? This will be recorded in history.')) return
     try {
       await apiRequest(`/operations/${id}`, 'DELETE', token ?? undefined)
@@ -1718,7 +1853,10 @@ function OperationsPage({
           <div className="list-card">
             <div className="list-header">
               <h2>{opLabel} List</h2>
-              <p className="muted">Validate or remove non-done {statBaseLabel.toLowerCase()}.</p>
+              <p className="muted">
+                Validate {statBaseLabel.toLowerCase()} normally.
+                {!canDeleteOperations ? ' Delete access is restricted. Please contact admin.' : ` Remove non-done ${statBaseLabel.toLowerCase()}.`}
+              </p>
             </div>
           <div className="data-table-wrap">
             <table className="data-table">
@@ -1791,7 +1929,7 @@ function OperationsPage({
                             {nextStatus}
                           </button>
                         ))}
-                        {op.status !== 'Done' && (
+                        {op.status !== 'Done' && canDeleteOperations && (
                           <button type="button" className="btn-icon" onClick={() => deleteOperation(op.id)} title="Delete document">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                           </button>
@@ -2061,14 +2199,17 @@ function MoveHistoryPage({
 function WarehousesPage({
   token,
   pushToast,
+  currentUser,
 }: {
   token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
+  currentUser: UserProfile | null
 }) {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [name, setName] = useState('')
   const [type, setType] = useState('Internal')
   const [loading, setLoading] = useState(true)
+  const canManageLocations = hasElevatedAccess(currentUser)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -2093,6 +2234,10 @@ function WarehousesPage({
   }, [load])
 
   const deleteWarehouse = async (id: number) => {
+    if (!canManageLocations) {
+      pushToast('error', 'Only admin-approved roles can change locations. Please contact admin.')
+      return
+    }
     if (!window.confirm('Are you sure you want to delete this warehouse? This will be recorded in history.')) return
     try {
       await apiRequest(`/locations/${id}`, 'DELETE', token ?? undefined)
@@ -2105,6 +2250,10 @@ function WarehousesPage({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    if (!canManageLocations) {
+      pushToast('error', 'Only admin-approved roles can change locations. Please contact admin.')
+      return
+    }
     if (!name.trim()) {
       pushToast('error', 'Warehouse name is required')
       return
@@ -2161,21 +2310,25 @@ function WarehousesPage({
         <div className="panel-card warehouses-form-card">
           <div className="panel-card-header">Add Warehouse / Location</div>
           <div className="panel-card-body">
-            <form onSubmit={submit}>
-              <div className="form-field">
-                <label className="form-field-label">Location Name</label>
-                <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main Warehouse" required />
-              </div>
-              <div className="form-field">
-                <label className="form-field-label">Location Type</label>
-                <select className="form-select" value={type} onChange={(e) => setType(e.target.value)}>
-                  <option value="Internal">Internal Location</option>
-                  <option value="Vendor">Vendor Location</option>
-                  <option value="Customer">Customer Location</option>
-                </select>
-              </div>
-              <button className="btn btn-primary" type="submit">Save Location</button>
-            </form>
+            {canManageLocations ? (
+              <form onSubmit={submit}>
+                <div className="form-field">
+                  <label className="form-field-label">Location Name</label>
+                  <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main Warehouse" required />
+                </div>
+                <div className="form-field">
+                  <label className="form-field-label">Location Type</label>
+                  <select className="form-select" value={type} onChange={(e) => setType(e.target.value)}>
+                    <option value="Internal">Internal Location</option>
+                    <option value="Vendor">Vendor Location</option>
+                    <option value="Customer">Customer Location</option>
+                  </select>
+                </div>
+                <button className="btn btn-primary" type="submit">Save Location</button>
+              </form>
+            ) : (
+              <p className="muted">Read-only access. Only admin-approved roles can change locations. Please contact admin.</p>
+            )}
           </div>
         </div>
 
@@ -2201,9 +2354,13 @@ function WarehousesPage({
                     <td><strong>{wh.name}</strong></td>
                     <td><span className="badge badge-draft">{wh.type}</span></td>
                     <td>
-                      <button type="button" className="btn-icon" onClick={() => deleteWarehouse(wh.id)} title="Delete location">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                      </button>
+                      {canManageLocations ? (
+                        <button type="button" className="btn-icon" onClick={() => deleteWarehouse(wh.id)} title="Delete location">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                        </button>
+                      ) : (
+                        <span className="muted">Contact admin</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -2225,13 +2382,56 @@ function ProfilePage({
 }) {
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [roleRequestStatus, setRoleRequestStatus] = useState<UserRoleRequestStatus | null>(null)
+  const [roleRequests, setRoleRequests] = useState<AdminRoleRequest[]>([])
+  const [roleRequestsLoading, setRoleRequestsLoading] = useState(false)
+  const [decisionBusyId, setDecisionBusyId] = useState<number | null>(null)
+
+  const loadRoleRequests = useCallback(async () => {
+    if (!token) return
+
+    setRoleRequestsLoading(true)
+    try {
+      const data = await apiRequest<AdminRoleRequest[]>('/admin/role-requests', 'GET', token)
+      setRoleRequests(Array.isArray(data) ? data : [])
+    } catch (error) {
+      if (isAdminRole(profile?.role)) {
+        pushToast('error', (error as Error).message)
+      }
+      setRoleRequests([])
+    } finally {
+      setRoleRequestsLoading(false)
+    }
+  }, [profile?.role, pushToast, token])
+
+  const decideRoleRequest = async (id: number, decision: 'approve' | 'reject') => {
+    setDecisionBusyId(id)
+    try {
+      await apiRequest(
+        `/admin/role-requests/${id}/${decision}`,
+        'POST',
+        token ?? undefined,
+        decision === 'reject' ? { note: 'Rejected by admin' } : undefined,
+      )
+      pushToast('success', `Request ${decision}d`)
+      await loadRoleRequests()
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setDecisionBusyId(null)
+    }
+  }
 
   useEffect(() => {
     const load = async () => {
       setLoading(true)
       try {
-        const data = await apiRequest<UserProfile>('/users/me', 'GET', token ?? undefined)
-        setProfile(data)
+        const [nextProfile, nextRoleRequestStatus] = await Promise.all([
+          apiRequest<UserProfile>('/users/me', 'GET', token ?? undefined),
+          apiRequest<UserRoleRequestStatus>('/users/role-request-status', 'GET', token ?? undefined),
+        ])
+        setProfile(nextProfile)
+        setRoleRequestStatus(nextRoleRequestStatus)
       } catch (error) {
         pushToast('error', (error as Error).message)
       } finally {
@@ -2247,44 +2447,181 @@ function ProfilePage({
     return () => clearInterval(timer)
   }, [token, pushToast])
 
+  useEffect(() => {
+    if (!isAdminRole(profile?.role)) {
+      setRoleRequests([])
+      return
+    }
+
+    loadRoleRequests()
+
+    const timer = setInterval(() => {
+      loadRoleRequests()
+    }, LIVE_SYNC_INTERVAL_MS)
+
+    return () => clearInterval(timer)
+  }, [loadRoleRequests, profile?.role])
+
+  const roleRequestBadgeClass =
+    roleRequestStatus?.status === 'pending'
+      ? 'badge-waiting'
+      : roleRequestStatus?.status === 'rejected'
+        ? 'badge-canceled'
+        : roleRequestStatus?.status === 'completed'
+          ? 'badge-done'
+          : 'badge-draft'
+
+  const roleRequestStatusLabel =
+    roleRequestStatus?.status === 'pending'
+      ? 'Pending Admin Review'
+      : roleRequestStatus?.status === 'rejected'
+        ? 'Rejected'
+        : roleRequestStatus?.status === 'completed'
+          ? 'Completed (Approved)'
+          : 'Not Requested'
+
+  const actionableRoleRequests = useMemo(
+    () => roleRequests.filter((request) => isPendingRoleRequestStatus(request.status)),
+    [roleRequests],
+  )
+
   return (
     <section className="profile-page">
-      <div className="operations-overview">
-        <div className="operations-overview-top">
-          <div className="product-title-block">
-            <h2>My Profile</h2>
-            <p>Your account identity and access role for this workspace.</p>
-          </div>
+      <div className="profile-hero">
+        <div className="product-title-block">
+          <h2>My Profile</h2>
+          <p>Your account identity and access role for this workspace.</p>
         </div>
       </div>
 
-      <div className="panel-card profile-card">
-        <div className="panel-card-header">Account Details</div>
-        <div className="panel-card-body">
-          {loading && <p className="muted">Loading profile…</p>}
-          {!loading && !profile && <p className="muted">Unable to load profile. Please try again.</p>}
-          {!loading && profile && (
-            <div className="info-grid">
-              <dl className="info-item">
-                <dt>Full Name</dt>
-                <dd>{profile.name}</dd>
-              </dl>
-              <dl className="info-item">
-                <dt>Email Address</dt>
-                <dd>{profile.email}</dd>
-              </dl>
-              <dl className="info-item">
-                <dt>Role</dt>
-                <dd>{profile.role}</dd>
-              </dl>
-              <dl className="info-item">
-                <dt>User ID</dt>
-                <dd>#{profile.id}</dd>
-              </dl>
-            </div>
-          )}
+      <div className="profile-grid">
+        <div className="panel-card profile-card">
+          <div className="panel-card-header">Account Details</div>
+          <div className="panel-card-body">
+            {loading && <p className="muted">Loading profile…</p>}
+            {!loading && !profile && <p className="muted">Unable to load profile. Please try again.</p>}
+            {!loading && profile && (
+              <div className="info-grid">
+                <dl className="info-item">
+                  <dt>Full Name</dt>
+                  <dd>{profile.name}</dd>
+                </dl>
+                <dl className="info-item">
+                  <dt>Email Address</dt>
+                  <dd>{profile.email}</dd>
+                </dl>
+                <dl className="info-item">
+                  <dt>Role</dt>
+                  <dd>{profile.role}</dd>
+                </dl>
+                <dl className="info-item">
+                  <dt>User ID</dt>
+                  <dd>#{profile.id}</dd>
+                </dl>
+              </div>
+            )}
+          </div>
         </div>
+
+        {!isAdminRole(profile?.role) && (
+          <div className="panel-card profile-card">
+            <div className="panel-card-header">Role Request Status</div>
+            <div className="panel-card-body">
+              {loading && <p className="muted">Loading role request status…</p>}
+              {!loading && !roleRequestStatus && <p className="muted">Unable to load role request status.</p>}
+              {!loading && roleRequestStatus && roleRequestStatus.status === 'not_requested' && (
+                <p className="muted">No elevated-role request has been submitted yet.</p>
+              )}
+              {!loading && roleRequestStatus && roleRequestStatus.status !== 'not_requested' && (
+                <div className="info-grid">
+                  <dl className="info-item">
+                    <dt>Status</dt>
+                    <dd>
+                      <span className={`badge ${roleRequestBadgeClass}`}>{roleRequestStatusLabel}</span>
+                    </dd>
+                  </dl>
+                  <dl className="info-item">
+                    <dt>Requested Role</dt>
+                    <dd>{roleRequestStatus.requested_role || '—'}</dd>
+                  </dl>
+                  <dl className="info-item">
+                    <dt>Requested At</dt>
+                    <dd>{roleRequestStatus.requested_at ? formatDate(roleRequestStatus.requested_at) : '—'}</dd>
+                  </dl>
+                  <dl className="info-item">
+                    <dt>Reviewed At</dt>
+                    <dd>{roleRequestStatus.reviewed_at ? formatDate(roleRequestStatus.reviewed_at) : '—'}</dd>
+                  </dl>
+                  <dl className="info-item">
+                    <dt>Review Note</dt>
+                    <dd>{roleRequestStatus.review_note || '—'}</dd>
+                  </dl>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {isAdminRole(profile?.role) && (
+        <div className="list-card">
+          <div className="list-header">
+            <h2>Pending Role Requests</h2>
+            <p className="muted">Approve or reject verified requests awaiting admin decision.</p>
+          </div>
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Requested Role</th>
+                  <th>Status</th>
+                  <th>Requested At</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {roleRequestsLoading && <tr className="empty-row"><td colSpan={6}>Loading requests…</td></tr>}
+                {!roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>No pending approvals right now.</td></tr>}
+                {!roleRequestsLoading && actionableRoleRequests.map((request) => (
+                  <tr key={request.id}>
+                    <td><strong>{request.name}</strong></td>
+                    <td>{request.email}</td>
+                    <td><span className="badge badge-ready">{request.requested_role}</span></td>
+                    <td>
+                      <span className="badge badge-waiting">
+                        Pending
+                      </span>
+                    </td>
+                    <td>{formatDate(request.created_at)}</td>
+                    <td>
+                      <div className="operation-row-actions">
+                        <button
+                          type="button"
+                          className="btn btn-success btn-sm"
+                          onClick={() => { void decideRoleRequest(request.id, 'approve') }}
+                          disabled={decisionBusyId === request.id}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-danger-outline btn-sm"
+                          onClick={() => { void decideRoleRequest(request.id, 'reject') }}
+                          disabled={decisionBusyId === request.id}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

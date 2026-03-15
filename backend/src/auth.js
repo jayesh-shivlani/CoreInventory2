@@ -50,7 +50,7 @@ function requireRole(allowedRoles = []) {
   return (req, res, next) => {
     const currentRole = String(req.user?.role || '').trim().toLowerCase()
     if (!currentRole || !normalized.has(currentRole)) {
-      return res.status(403).json({ message: 'Forbidden: insufficient role permissions' })
+      return res.status(403).json({ message: 'Only admin can make this change. Please contact admin.' })
     }
     return next()
   }
