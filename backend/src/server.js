@@ -58,6 +58,10 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
   const smtpUser = process.env.SMTP_USER
   const smtpPass = process.env.SMTP_PASS
   const from = process.env.FROM_EMAIL || smtpUser || 'onboarding@resend.dev'
+  const isProduction = process.env.NODE_ENV === 'production'
+
+  let smtpError = null
+  let resendError = null
 
   if (smtpHost && smtpUser && smtpPass) {
     try {
@@ -82,14 +86,18 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
       return { delivered: true }
     } catch (error) {
       console.error('SMTP email sending failed:', error)
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('Email service failed to deliver OTP')
-      }
+      smtpError = error
     }
   }
 
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) {
+    if (isProduction) {
+      const reason = smtpError
+        ? `SMTP failed and RESEND_API_KEY is not configured`
+        : 'No email provider configured (missing SMTP config and RESEND_API_KEY)'
+      throw new Error(reason)
+    }
     console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
     return { delivered: false }
   }
@@ -113,11 +121,19 @@ async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
     return { delivered: true }
   } catch (error) {
     console.error('Email sending failed:', error)
-    if (process.env.NODE_ENV !== 'production') {
+    resendError = error
+    if (!isProduction) {
       console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`)
       return { delivered: false }
     }
-    throw new Error('Email service failed to deliver OTP')
+
+    const details = []
+    if (smtpError) {
+      details.push(`SMTP failed: ${smtpError.message || String(smtpError)}`)
+    }
+    details.push(`Resend failed: ${resendError.message || String(resendError)}`)
+
+    throw new Error(`Email service failed to deliver OTP. ${details.join(' | ')}`)
   }
 }
 
