@@ -202,6 +202,7 @@ async function initDb() {
     ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
     ALTER TABLE IF EXISTS public.operation_lines ENABLE ROW LEVEL SECURITY;
     ALTER TABLE IF EXISTS public.stock_ledger ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.role_audit_log ENABLE ROW LEVEL SECURITY;
     ALTER TABLE IF EXISTS public.signup_verifications ENABLE ROW LEVEL SECURITY;
     ALTER TABLE IF EXISTS public.audit_history ENABLE ROW LEVEL SECURITY;
 
@@ -216,6 +217,7 @@ async function initDb() {
         'users',
         'operation_lines',
         'stock_ledger',
+        'role_audit_log',
         'signup_verifications',
         'audit_history'
       ];

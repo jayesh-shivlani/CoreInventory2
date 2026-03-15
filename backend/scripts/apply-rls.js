@@ -15,6 +15,7 @@ async function main() {
     'users',
     'operation_lines',
     'stock_ledger',
+    'role_audit_log',
     'signup_verifications',
     'audit_history',
   ]

@@ -29,7 +29,7 @@ Auto-provisioned in blueprint:
 - `JWT_SECRET` (generated)
 - `FRONTEND_DIST_PATH=../frontend/dist`
 
-Optional email/OTP variables:
+Email/OTP variables (required if you use signup OTP or password reset OTP in production):
 
 - `SMTP_HOST`
 - `SMTP_PORT`
@@ -39,6 +39,12 @@ Optional email/OTP variables:
 - `RESEND_API_KEY`
 - `SIGNUP_OTP_TTL_MINUTES`
 - `RESET_OTP_TTL_MINUTES`
+
+Notes:
+
+- Configure at least one provider: SMTP or Resend.
+- If SMTP fails in production and `RESEND_API_KEY` is not set, OTP delivery will fail.
+- For Resend production usage, set `FROM_EMAIL` to a sender from your verified domain.
 
 ## Build and Start
 
