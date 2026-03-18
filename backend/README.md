@@ -24,8 +24,14 @@ Backend API for Core Inventory IMS, built with Node.js + Express and PostgreSQL.
 backend/
 |- src/
 |  |- auth.js      # token signing and auth middleware
+|  |- config.js    # environment loading + runtime config checks
 |  |- db.js        # DB adapter + schema bootstrap + seed
+|  |- services/
+|  |  `- emailService.js
+|  |- utils/
+|  |  `- withTimeout.js
 |  `- server.js    # API routes and app bootstrap
+|- scripts/        # smoke tests and RLS/role verification helpers
 |- data/           # reserved for local data assets if needed
 |- .env.example
 |- package.json
@@ -64,6 +70,12 @@ npm install
 npm run dev
 ```
 
+Smoke test API flows:
+
+```bash
+npm run test:smoke
+```
+
 Default base URL: `http://localhost:4000`
 
 Health endpoint:
@@ -72,12 +84,15 @@ Health endpoint:
 
 ## Main API Endpoints
 
+The list below is intentionally grouped by domain and includes the primary routes currently exposed by the backend.
+
 Auth:
 
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `POST /api/auth/reset-password`
 - `GET /api/users/me`
+- `GET /api/users/role-request-status`
 
 Dashboard:
 
@@ -97,54 +112,54 @@ Operations and ledger:
 
 - `GET /api/operations`
 - `POST /api/operations`
+- `POST /api/operations/:id/status`
 - `POST /api/operations/:id/validate`
+- `DELETE /api/operations/:id`
 - `GET /api/ledger`
 
 Locations:
 
 - `GET /api/locations`
 - `POST /api/locations`
-
-## Authorization Notes
+- `DELETE /api/locations/:id`
 
 Notifications:
 
-- `GET /api/notifications` — role-filtered: low-stock, pending approvals, operation status
+- `GET /api/notifications`
+
+## Authorization Notes
 
 Admin (Admin role required):
 
 - `GET /api/admin/role-requests`
 - `POST /api/admin/role-requests/:id/approve`
 - `POST /api/admin/role-requests/:id/reject`
-- `POST /api/admin/role-requests/:id/revoke`
+- `GET /api/admin/users`
+- `POST /api/admin/users/:id/revoke-role`
 - `DELETE /api/admin/users/:id`
 - `GET /api/admin/role-audit-log`
 
-## Authorization Notes
-
-- All operational and read APIs require a valid JWT.
-- Manager/Admin role is required for sensitive write routes:
-	- `POST /api/products`
-	- `PUT /api/products/:id`
-	- `DELETE /api/products/:id`
-	- `POST /api/locations`
-	- `DELETE /api/locations/:id`
-	- `DELETE /api/operations/:id`
-
 ## Demo Credentials
+
+Local development seed user (non-production):
 
 - Email: `demo@coreinventory.app`
 - Password: `demo12345`
 
-- All operational and read APIs require a valid JWT.
-- Manager/Admin role is required for sensitive write routes:
-	- `POST /api/products`
-	- `PUT /api/products/:id`
-	- `DELETE /api/products/:id`
-	- `POST /api/locations`
-	- `DELETE /api/locations/:id`
-	- `DELETE /api/operations/:id`
-- Admin role is required for all `/api/admin/*` routes.
+Do not use seed/demo credentials in production.
+
+All operational and read APIs require a valid JWT.
+
+Manager/Admin role is required for sensitive write routes:
+
+- `POST /api/products`
+- `PUT /api/products/:id`
+- `DELETE /api/products/:id`
+- `POST /api/locations`
+- `DELETE /api/locations/:id`
+- `DELETE /api/operations/:id`
+
+Admin role is required for all `/api/admin/*` routes.
 
 ## Environment Variables — Admin Seed
 
@@ -157,3 +172,13 @@ On first startup, the database is seeded with a default admin user. Configure th
 | `ADMIN_NAME` | `Admin User` | Display name for default admin |
 
 Always override the defaults via environment variables in production.
+
+## Production Readiness
+
+- Set `JWT_SECRET` to a strong non-default secret.
+- Ensure `DATABASE_URL` is configured.
+- Set `ALLOWED_ORIGINS` (or `CLIENT_ORIGIN`) explicitly.
+- Set `EXPOSE_DEV_OTP=false`.
+- Keep `STRICT_EMAIL_DOMAIN_CHECK` enabled if your DNS environment is stable.
+- Change `ADMIN_EMAIL` and `ADMIN_PASSWORD` from defaults before first production startup.
+- Do not commit `.env` or any secret-bearing files.

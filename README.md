@@ -1,9 +1,3 @@
-# Key Note 
-
-I have updated the website later after uploading the video and add many meaningful changes to website, so please make sure to checkout the website
-
-Updated website video demo : https://drive.google.com/file/d/1A7VpBDR0ANx1dGWxCqKXQ0j62V2Y25Yk/view?usp=sharing
-
 # Core Inventory IMS
 
 A full-stack inventory management system for product cataloging, warehouse stock control, and internal logistics operations.
@@ -122,6 +116,13 @@ npm run dev:frontend
 - `npm run install:all` : install backend and frontend dependencies
 - `npm run test:smoke:api` : run automated backend API smoke tests
 
+## CI Checks
+
+GitHub Actions workflow: `.github/workflows/ci.yml`
+
+- Always runs frontend lint/build and backend syntax checks on push/PR.
+- Runs backend smoke tests only when `CI_DATABASE_URL` is provided as a repository secret.
+
 ## API Highlights
 
 Auth & users:
@@ -129,6 +130,7 @@ Auth & users:
 - `POST /api/auth/login`
 - `POST /api/auth/reset-password`
 - `GET /api/users/me`
+- `GET /api/users/role-request-status`
 
 Dashboard:
 - `GET /api/dashboard/kpis`
@@ -143,18 +145,22 @@ Products & inventory:
 Operations & ledger:
 - `GET /api/operations`
 - `POST /api/operations`
+- `POST /api/operations/:id/status`
 - `POST /api/operations/:id/validate`
+- `DELETE /api/operations/:id`
 - `GET /api/ledger`
 
 Locations:
 - `GET /api/locations`
 - `POST /api/locations`
+- `DELETE /api/locations/:id`
 
 Admin (Admin role required):
 - `GET /api/admin/role-requests`
 - `POST /api/admin/role-requests/:id/approve`
 - `POST /api/admin/role-requests/:id/reject`
-- `POST /api/admin/role-requests/:id/revoke`
+- `GET /api/admin/users`
+- `POST /api/admin/users/:id/revoke-role`
 - `DELETE /api/admin/users/:id`
 - `GET /api/admin/role-audit-log`
 
@@ -165,6 +171,13 @@ Notifications:
 
 - Render configuration is provided in `render.yaml`
 - Deployment runbook is in `DEPLOYMENT.md`
+
+## Production Readiness
+
+- Set strong non-default values for `JWT_SECRET`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD`.
+- Keep `EXPOSE_DEV_OTP=false` in production.
+- Configure `ALLOWED_ORIGINS` explicitly for your deployed frontend origin.
+- Do not commit `.env` files or secret-bearing files.
 
 ## Demo Access
 

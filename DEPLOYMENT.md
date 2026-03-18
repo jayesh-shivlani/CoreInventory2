@@ -29,22 +29,18 @@ Auto-provisioned in blueprint:
 - `JWT_SECRET` (generated)
 - `FRONTEND_DIST_PATH=../frontend/dist`
 
-Email/OTP variables (Gmail SMTP):
+Email/OTP variables (Brevo):
 
-- `SMTP_HOST` (use `smtp.gmail.com`)
-- `SMTP_PORT` (use `587`)
-- `SMTP_USER` (your Gmail address)
-- `SMTP_PASS` (Gmail app password)
-- `FROM_EMAIL` (typically same as `SMTP_USER`)
-- `SMTP_TIMEOUT_MS` (default `15000`)
-- `SMTP_MAX_ATTEMPTS` (default `2`)
+- `BREVO_API_KEY` (required for email delivery)
+- `FROM_EMAIL` (verified sender email)
+- `EMAIL_TIMEOUT_MS` (default `15000`)
 - `SIGNUP_OTP_TTL_MINUTES`
 - `RESET_OTP_TTL_MINUTES`
 
 Notes:
 
-- Enable Google 2-Step Verification, then generate and use an App Password for `SMTP_PASS`.
-- Regular Gmail account password will not work for SMTP.
+- Verify your sender identity in Brevo before production use.
+- Keep `EXPOSE_DEV_OTP=false` in production.
 
 ## Build and Start
 

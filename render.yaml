@@ -19,25 +19,13 @@ services:
         sync: false
       - key: FRONTEND_DIST_PATH
         value: ../frontend/dist
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
       - key: FROM_EMAIL
         sync: false
-      - key: SMTP_TIMEOUT_MS
+      - key: EMAIL_TIMEOUT_MS
         value: "15000"
-      - key: SMTP_MAX_ATTEMPTS
-        value: "2"
       - key: SIGNUP_OTP_TTL_MINUTES
         value: "10"
       - key: RESET_OTP_TTL_MINUTES
         value: "10"
-      - key: RESEND_API_KEY
-        sync: false
       - key: BREVO_API_KEY
         sync: false

@@ -9,203 +9,31 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom'
-
-type KPIResponse = {
-  totalProductsInStock: number
-  lowOrOutOfStockItems: number
-  pendingReceipts: number
-  pendingDeliveries: number
-  scheduledInternalTransfers: number
-}
-
-type DashboardFilterResponse = {
-  documentTypes: string[]
-  statuses: string[]
-  warehouses: string[]
-  categories: string[]
-}
-
-type ProductFilterOptions = {
-  categories: string[]
-  locations: string[]
-  uoms: string[]
-}
-
-type Product = {
-  id: number
-  name: string
-  sku: string
-  category: string
-  unit_of_measure: string
-  reorder_minimum?: number
-  availableStock?: number
-  locationName?: string
-}
-
-type OperationKind = 'Receipt' | 'Delivery' | 'Internal' | 'Adjustment'
-
-type Operation = {
-  id: number
-  reference_number: string
-  type: OperationKind
-  status: 'Draft' | 'Waiting' | 'Ready' | 'Done' | 'Canceled'
-  source_location_name?: string
-  destination_location_name?: string
-  created_at: string
-}
-
-type LedgerEntry = {
-  id: number
-  timestamp: string
-  product_name: string
-  from_location_name?: string
-  to_location_name?: string
-  quantity: number
-  reference_number?: string
-  note?: string
-}
-
-type Warehouse = {
-  id: number
-  name: string
-  type: string
-}
-
-type UserProfile = {
-  id: number
-  name: string
-  email: string
-  role: string
-}
-
-type AdminRoleRequest = {
-  id: number
-  name: string
-  email: string
-  requested_role: string
-  status: string
-  created_at: string
-  reviewed_at?: string
-  review_note?: string
-  reviewed_by_name?: string
-}
-
-type UserRoleRequestStatus = {
-  status: 'not_requested' | 'pending' | 'rejected' | 'completed'
-  requested_role: string | null
-  requested_at: string | null
-  reviewed_at: string | null
-  review_note: string | null
-}
-
-type AdminManagedUser = {
-  id: number
-  name: string
-  email: string
-  role: string
-}
-
-type RoleAuditEntry = {
-  id: number
-  action: string
-  target_user_id: number | null
-  target_user_email: string | null
-  old_role: string | null
-  new_role: string | null
-  performed_by_id: number | null
-  performed_by_email: string | null
-  note: string | null
-  created_at: string
-}
-
-type NotificationItem = {
-  id: string
-  kind: 'success' | 'warning' | 'error' | 'info'
-  title: string
-  message: string
-  link: string
-}
-
-type Toast = {
-  id: number
-  kind: 'success' | 'error' | 'info'
-  text: string
-}
-
-type OperationDraftLine = {
-  product_id: string
-  requested_quantity: string
-  picked_quantity?: string
-  packed_quantity?: string
-}
-
-type ProductStockRow = {
-  location_id: number
-  location_name: string
-  quantity: number
-}
-
-const TOKEN_KEY = 'ims-auth-token'
-const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '/api').replace(/\/$/, '')
-const LIVE_SYNC_INTERVAL_MS = 8000
-const DEFAULT_UOMS = ['Units', 'Kg', 'L', 'Box', 'Pack', 'Piece']
-const DEFAULT_CATEGORIES = ['Raw Materials', 'Finished Goods', 'Consumables', 'Electronics', 'Hardware']
-const AUTH_INVALID_EVENT = 'ims-auth-invalid'
-
-const toOperationKind = (path: string): OperationKind => {
-  if (path.includes('receipts')) return 'Receipt'
-  if (path.includes('deliveries')) return 'Delivery'
-  if (path.includes('transfers')) return 'Internal'
-  return 'Adjustment'
-}
-
-const safeNumber = (value: unknown): number => {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : 0
-}
-
-const formatDate = (value: string): string => {
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
-  return parsed.toLocaleString()
-}
-
-async function apiRequest<T>(
-  path: string,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
-  token?: string,
-  payload?: unknown,
-): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: payload ? JSON.stringify(payload) : undefined,
-  })
-
-  let body: unknown = null
-  try {
-    body = await response.json()
-  } catch {
-    body = null
-  }
-
-  if (!response.ok) {
-    const message =
-      (body as { message?: string } | null)?.message ??
-      `Request failed (${response.status})`
-
-    if (response.status === 401) {
-      window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { message } }))
-    }
-
-    throw new Error(message)
-  }
-
-  return body as T
-}
+import { AUTH_INVALID_EVENT, DEFAULT_CATEGORIES, DEFAULT_UOMS, LIVE_SYNC_INTERVAL_MS, TOKEN_KEY } from './config/constants'
+import {
+  apiRequest,
+  formatDate,
+  safeNumber,
+  toOperationKind,
+} from './utils/helpers'
+import type {
+  AdminManagedUser,
+  AdminRoleRequest,
+  DashboardFilterResponse,
+  KPIResponse,
+  LedgerEntry,
+  NotificationItem,
+  Operation,
+  OperationDraftLine,
+  Product,
+  ProductFilterOptions,
+  ProductStockRow,
+  RoleAuditEntry,
+  Toast,
+  UserProfile,
+  UserRoleRequestStatus,
+  Warehouse,
+} from './types/models'
 
 function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
@@ -214,7 +42,6 @@ function App() {
 
   useEffect(() => {
     if (!token) {
-      setCurrentUser(null)
       return
     }
 
