@@ -5,6 +5,16 @@ const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
 const DEFAULT_FROM_EMAIL = 'coreinventory.support@gmail.com'
 const FROM_NAME = 'Core Inventory'
 
+function escapeHtml(value) {
+  const str = String(value ?? '')
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function getEmailProviderState() {
   const brevoConfigured = Boolean(process.env.BREVO_API_KEY)
   return {
@@ -104,8 +114,8 @@ async function sendRoleApprovedEmail(toEmail, recipientName, approvedRole) {
     return { delivered: false }
   }
 
-  const safeName = String(recipientName || '').trim() || 'there'
-  const roleName = String(approvedRole || 'Manager').trim()
+  const safeName = escapeHtml(String(recipientName || '').trim() || 'there')
+  const roleName = escapeHtml(String(approvedRole || 'Manager').trim())
   const authLink = getAuthPageLink()
   const linkHtml = authLink ? `<p>You can sign in here: <a href="${authLink}">${authLink}</a></p>` : ''
 
@@ -122,9 +132,72 @@ async function sendRoleApprovedEmail(toEmail, recipientName, approvedRole) {
   throw new Error('Brevo role approval email delivery failed')
 }
 
+async function sendRoleRejectedEmail(toEmail, recipientName, requestedRole, reviewNote) {
+  const normalizedEmail = String(toEmail || '').toLowerCase().trim()
+  if (!normalizedEmail) {
+    return { delivered: false }
+  }
+
+  const emailState = getEmailProviderState()
+  if (!emailState.configured) {
+    return { delivered: false }
+  }
+
+  const safeName = escapeHtml(String(recipientName || '').trim() || 'there')
+  const roleName = escapeHtml(String(requestedRole || 'Manager').trim())
+  const note = escapeHtml(String(reviewNote || 'Rejected by admin').trim())
+  const authLink = getAuthPageLink()
+  const linkHtml = authLink ? `<p>You can sign in here: <a href="${authLink}">${authLink}</a></p>` : ''
+
+  const delivery = await sendBrevoEmail(
+    normalizedEmail,
+    'Your role request was rejected',
+    `<p>Hi ${safeName},</p><p>Your request for the <strong>${roleName}</strong> role was reviewed and rejected by an admin.</p><p><strong>Reason:</strong> ${note}</p>${linkHtml}<p>You can submit a new role request from your profile if needed.</p><p>Thanks,<br/>Core Inventory Team</p>`,
+  )
+
+  if (delivery && delivery.delivered) {
+    return delivery
+  }
+
+  throw new Error('Brevo role rejection email delivery failed')
+}
+
+async function sendRoleUpdatedEmail(toEmail, recipientName, oldRole, newRole, adminNote) {
+  const normalizedEmail = String(toEmail || '').toLowerCase().trim()
+  if (!normalizedEmail) {
+    return { delivered: false }
+  }
+
+  const emailState = getEmailProviderState()
+  if (!emailState.configured) {
+    return { delivered: false }
+  }
+
+  const safeName = escapeHtml(String(recipientName || '').trim() || 'there')
+  const fromRole = escapeHtml(String(oldRole || 'Previous role').trim())
+  const toRole = escapeHtml(String(newRole || 'Updated role').trim())
+  const note = escapeHtml(String(adminNote || 'Role updated by admin').trim())
+  const authLink = getAuthPageLink()
+  const linkHtml = authLink ? `<p>You can sign in here: <a href="${authLink}">${authLink}</a></p>` : ''
+
+  const delivery = await sendBrevoEmail(
+    normalizedEmail,
+    'Your account role has been updated',
+    `<p>Hi ${safeName},</p><p>Your account role was updated by an admin.</p><p><strong>Role change:</strong> ${fromRole} → ${toRole}</p><p><strong>Details:</strong> ${note}</p>${linkHtml}<p>Thanks,<br/>Core Inventory Team</p>`,
+  )
+
+  if (delivery && delivery.delivered) {
+    return delivery
+  }
+
+  throw new Error('Brevo role update email delivery failed')
+}
+
 module.exports = {
   getEmailProviderState,
   sendOtpEmail,
   sendRoleApprovedEmail,
+  sendRoleRejectedEmail,
+  sendRoleUpdatedEmail,
   toOtpDeliveryMessage,
 }

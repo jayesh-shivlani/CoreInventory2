@@ -131,6 +131,7 @@ Auth & users:
 - `POST /api/auth/reset-password`
 - `GET /api/users/me`
 - `GET /api/users/role-request-status`
+- `POST /api/users/role-requests`
 
 Dashboard:
 - `GET /api/dashboard/kpis`
@@ -160,6 +161,7 @@ Admin (Admin role required):
 - `POST /api/admin/role-requests/:id/approve`
 - `POST /api/admin/role-requests/:id/reject`
 - `GET /api/admin/users`
+- `POST /api/admin/users/:id/upgrade-role`
 - `POST /api/admin/users/:id/revoke-role`
 - `DELETE /api/admin/users/:id`
 - `GET /api/admin/role-audit-log`

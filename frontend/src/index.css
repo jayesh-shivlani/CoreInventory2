@@ -1739,6 +1739,10 @@ a { text-decoration: none; color: inherit; }
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.profile-role-request-action {
+  margin-top: 12px;
+}
+
 /* ─── Responsive ───────────────────────────────────────────── */
 @media (max-width: 900px) {
   .split-layout { grid-template-columns: 1fr; }

@@ -174,6 +174,8 @@ function ProtectedLayout({
   const [notifOpen, setNotifOpen] = useState(false)
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const notifRef = useRef<HTMLDivElement>(null)
+  const knownNotificationIdsRef = useRef<Set<string>>(new Set())
+  const notificationInitRef = useRef(false)
 
   useEffect(() => {
     if (!token) return
@@ -189,6 +191,23 @@ function ProtectedLayout({
     const timer = setInterval(load, LIVE_SYNC_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [token])
+
+  useEffect(() => {
+    const nextIds = new Set(notifications.map((n) => n.id))
+
+    if (!notificationInitRef.current) {
+      knownNotificationIdsRef.current = nextIds
+      notificationInitRef.current = true
+      return
+    }
+
+    const hasNew = notifications.some((n) => !knownNotificationIdsRef.current.has(n.id))
+    knownNotificationIdsRef.current = nextIds
+
+    if (hasNew) {
+      playNotificationTing()
+    }
+  }, [notifications])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -357,6 +376,35 @@ function isAdminRole(role: string | undefined | null): boolean {
 function isPendingRoleRequestStatus(status: string | undefined | null): boolean {
   const normalized = String(status || '').trim().toUpperCase()
   return normalized === 'AWAITING_ADMIN_APPROVAL' || normalized === 'PENDING' || normalized === 'PENDING_ADMIN_APPROVAL'
+}
+
+function playNotificationTing() {
+  try {
+    const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioCtx) return
+
+    const ctx = new AudioCtx()
+    const oscillator = ctx.createOscillator()
+    const gainNode = ctx.createGain()
+
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(1100, ctx.currentTime)
+    oscillator.frequency.exponentialRampToValueAtTime(1450, ctx.currentTime + 0.08)
+
+    gainNode.gain.setValueAtTime(0.0001, ctx.currentTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01)
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18)
+
+    oscillator.connect(gainNode)
+    gainNode.connect(ctx.destination)
+    oscillator.start()
+    oscillator.stop(ctx.currentTime + 0.2)
+    oscillator.onended = () => {
+      void ctx.close().catch(() => undefined)
+    }
+  } catch {
+    // Ignore audio restrictions/errors to keep notifications non-blocking.
+  }
 }
 
 function isStrongPassword(password: string): boolean {
@@ -2429,10 +2477,23 @@ function ProfilePage({
   const [decisionBusyId, setDecisionBusyId] = useState<number | null>(null)
   const [managedUsers, setManagedUsers] = useState<AdminManagedUser[]>([])
   const [managedUsersLoading, setManagedUsersLoading] = useState(false)
+  const [upgradeBusyId, setUpgradeBusyId] = useState<number | null>(null)
   const [revokeBusyId, setRevokeBusyId] = useState<number | null>(null)
   const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null)
+  const [requestSubmitBusy, setRequestSubmitBusy] = useState(false)
   const [auditLog, setAuditLog] = useState<RoleAuditEntry[]>([])
   const [auditLogLoading, setAuditLogLoading] = useState(false)
+
+  const loadProfileAndRoleRequestStatus = useCallback(async () => {
+    if (!token) return
+
+    const [nextProfile, nextRoleRequestStatus] = await Promise.all([
+      apiRequest<UserProfile>('/users/me', 'GET', token),
+      apiRequest<UserRoleRequestStatus>('/users/role-request-status', 'GET', token),
+    ])
+    setProfile(nextProfile)
+    setRoleRequestStatus(nextRoleRequestStatus)
+  }, [token])
 
   const loadRoleRequests = useCallback(async () => {
     if (!token) return
@@ -2520,6 +2581,50 @@ function ProfilePage({
     }
   }
 
+  const upgradeUserRole = async (user: AdminManagedUser) => {
+    if (String(user.role).trim().toLowerCase() !== 'warehouse staff') {
+      pushToast('error', 'Only warehouse staff users can be upgraded here.')
+      return
+    }
+
+    const ok = window.confirm(`Upgrade ${user.name} to Manager?`)
+    if (!ok) return
+
+    setUpgradeBusyId(user.id)
+    try {
+      await apiRequest(`/admin/users/${user.id}/upgrade-role`, 'POST', token ?? undefined)
+      pushToast('success', `${user.name} has been upgraded to Manager`)
+      await Promise.all([loadManagedUsers(), loadRoleRequests(), loadAuditLog()])
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setUpgradeBusyId(null)
+    }
+  }
+
+  const requestManagerRole = async () => {
+    if (String(profile?.role || '').trim().toLowerCase() !== 'warehouse staff') {
+      pushToast('error', 'Only warehouse staff can request Manager role.')
+      return
+    }
+
+    setRequestSubmitBusy(true)
+    try {
+      const result = await apiRequest<{ message?: string }>(
+        '/users/role-requests',
+        'POST',
+        token ?? undefined,
+        { requested_role: 'Manager' },
+      )
+      pushToast('success', result?.message || 'Manager role request submitted')
+      await loadProfileAndRoleRequestStatus()
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setRequestSubmitBusy(false)
+    }
+  }
+
   const deleteUser = async (user: AdminManagedUser) => {
     if (user.id === profile?.id) {
       pushToast('error', 'You cannot delete your own account.')
@@ -2543,12 +2648,7 @@ function ProfilePage({
     const load = async () => {
       setLoading(true)
       try {
-        const [nextProfile, nextRoleRequestStatus] = await Promise.all([
-          apiRequest<UserProfile>('/users/me', 'GET', token ?? undefined),
-          apiRequest<UserRoleRequestStatus>('/users/role-request-status', 'GET', token ?? undefined),
-        ])
-        setProfile(nextProfile)
-        setRoleRequestStatus(nextRoleRequestStatus)
+        await loadProfileAndRoleRequestStatus()
       } catch (error) {
         pushToast('error', (error as Error).message)
       } finally {
@@ -2562,7 +2662,7 @@ function ProfilePage({
     }, LIVE_SYNC_INTERVAL_MS)
 
     return () => clearInterval(timer)
-  }, [token, pushToast])
+  }, [loadProfileAndRoleRequestStatus, pushToast])
 
   useEffect(() => {
     if (!isAdminRole(profile?.role)) {
@@ -2588,6 +2688,8 @@ function ProfilePage({
   const roleRequestBadgeClass =
     roleRequestStatus?.status === 'pending'
       ? 'badge-waiting'
+      : roleRequestStatus?.status === 'revoked'
+        ? 'badge-canceled'
       : roleRequestStatus?.status === 'rejected'
         ? 'badge-canceled'
         : roleRequestStatus?.status === 'completed'
@@ -2597,11 +2699,17 @@ function ProfilePage({
   const roleRequestStatusLabel =
     roleRequestStatus?.status === 'pending'
       ? 'Pending Admin Review'
+      : roleRequestStatus?.status === 'revoked'
+        ? 'Revoked by Admin'
       : roleRequestStatus?.status === 'rejected'
         ? 'Rejected'
         : roleRequestStatus?.status === 'completed'
           ? 'Completed (Approved)'
           : 'Not Requested'
+
+  const canApplyForManagerRole =
+    String(profile?.role || '').trim().toLowerCase() === 'warehouse staff' &&
+    roleRequestStatus?.status !== 'pending'
 
   const actionableRoleRequests = useMemo(
     () => roleRequests.filter((request) => isPendingRoleRequestStatus(request.status)),
@@ -2688,6 +2796,18 @@ function ProfilePage({
                   </dl>
                 </div>
               )}
+              {profile && roleRequestStatus && canApplyForManagerRole && (
+                <div className="profile-role-request-action">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => { void requestManagerRole() }}
+                    disabled={requestSubmitBusy}
+                  >
+                    {requestSubmitBusy ? 'Submitting…' : 'Apply for Manager Role'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2760,7 +2880,7 @@ function ProfilePage({
             <div className="list-header">
               <h2>Role Access Management</h2>
               <div className="list-header-meta">
-                <p className="muted">Manage user roles and accounts. Revoke elevated access or delete users entirely.</p>
+                <p className="muted">Manage user roles and accounts. Upgrade staff, revoke elevated access, or delete users.</p>
                 <SyncStatusChip show={managedUsersRefreshing} />
               </div>
             </div>
@@ -2771,13 +2891,14 @@ function ProfilePage({
                     <th>Name</th>
                     <th>Email</th>
                     <th>Current Role</th>
+                    <th>Upgrade</th>
                     <th>Revoke Role</th>
                     <th>Delete User</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={5}>Loading users…</td></tr>}
-                  {!managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={5}>No users found.</td></tr>}
+                  {managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading users…</td></tr>}
+                  {!managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={6}>No users found.</td></tr>}
                   {managedUsers.map((user) => (
                     <tr key={user.id}>
                       <td><strong>{user.name}</strong></td>
@@ -2788,6 +2909,20 @@ function ProfilePage({
                         </span>
                       </td>
                       <td>
+                        {String(user.role).toLowerCase() !== 'warehouse staff' ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-success btn-sm"
+                            onClick={() => { void upgradeUserRole(user) }}
+                            disabled={upgradeBusyId === user.id || revokeBusyId === user.id || deleteBusyId === user.id}
+                          >
+                            {upgradeBusyId === user.id ? 'Upgrading…' : 'Upgrade to Manager'}
+                          </button>
+                        )}
+                      </td>
+                      <td>
                         {user.id === profile?.id || String(user.role).toLowerCase() === 'warehouse staff' ? (
                           <span className="muted">—</span>
                         ) : (
@@ -2795,7 +2930,7 @@ function ProfilePage({
                             type="button"
                             className="btn btn-danger-outline btn-sm"
                             onClick={() => { void revokeUserRole(user) }}
-                            disabled={revokeBusyId === user.id || deleteBusyId === user.id}
+                            disabled={revokeBusyId === user.id || upgradeBusyId === user.id || deleteBusyId === user.id}
                           >
                             {revokeBusyId === user.id ? 'Revoking…' : 'Revoke Role'}
                           </button>
@@ -2809,7 +2944,7 @@ function ProfilePage({
                             type="button"
                             className="btn btn-danger btn-sm"
                             onClick={() => { void deleteUser(user) }}
-                            disabled={deleteBusyId === user.id || revokeBusyId === user.id}
+                            disabled={deleteBusyId === user.id || revokeBusyId === user.id || upgradeBusyId === user.id}
                           >
                             {deleteBusyId === user.id ? 'Deleting…' : 'Delete'}
                           </button>
@@ -2826,7 +2961,7 @@ function ProfilePage({
             <div className="list-header">
               <h2>Role Audit History</h2>
               <div className="list-header-meta">
-                <p className="muted">Record of all role approvals, rejections, and revocations.</p>
+                <p className="muted">Record of role requests, approvals, rejections, upgrades, revocations, and user deletions.</p>
                 <SyncStatusChip show={auditLogRefreshing} />
               </div>
             </div>
@@ -2848,13 +2983,25 @@ function ProfilePage({
                   {auditLog.map((entry) => (
                     <tr key={entry.id}>
                       <td>
-                        <span className={`badge ${entry.action === 'ROLE_APPROVED' ? 'badge-done' : entry.action === 'ROLE_REVOKED' ? 'badge-canceled' : 'badge-draft'}`}>
-                          {entry.action === 'ROLE_APPROVED' ? 'Approved' : entry.action === 'ROLE_REJECTED' ? 'Rejected' : 'Revoked'}
+                        <span className={`badge ${entry.action === 'ROLE_APPROVED' || entry.action === 'ROLE_UPGRADED' ? 'badge-done' : entry.action === 'ROLE_REVOKED' || entry.action === 'USER_DELETED' ? 'badge-canceled' : entry.action === 'ROLE_REJECTED' ? 'badge-draft' : 'badge-ready'}`}>
+                          {entry.action === 'ROLE_APPROVED'
+                            ? 'Approved'
+                            : entry.action === 'ROLE_REJECTED'
+                              ? 'Rejected'
+                              : entry.action === 'ROLE_UPGRADED'
+                                ? 'Upgraded'
+                                : entry.action === 'USER_DELETED'
+                                  ? 'Deleted'
+                                  : entry.action === 'ROLE_REQUESTED'
+                                    ? 'Requested'
+                                    : 'Revoked'}
                         </span>
                       </td>
                       <td>{entry.target_user_email ?? '—'}</td>
                       <td>
-                        {entry.old_role && entry.new_role
+                        {entry.action === 'USER_DELETED'
+                          ? <span>{entry.old_role || 'User'} → Deleted</span>
+                          : entry.old_role && entry.new_role
                           ? <span>{entry.old_role} → {entry.new_role}</span>
                           : entry.new_role ?? '—'}
                       </td>

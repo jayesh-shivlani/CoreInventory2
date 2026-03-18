@@ -16,6 +16,8 @@ const {
   getEmailProviderState,
   sendOtpEmail,
   sendRoleApprovedEmail,
+  sendRoleRejectedEmail,
+  sendRoleUpdatedEmail,
   toOtpDeliveryMessage,
 } = require('./services/emailService')
 const { withTimeout } = require('./utils/withTimeout')
@@ -353,6 +355,8 @@ app.get('/api/users/role-request-status', requireAuth, async (req, res) => {
       ? 'pending'
       : normalized === 'APPROVED'
         ? 'completed'
+        : normalized === 'REVOKED'
+          ? 'revoked'
         : normalized === 'REJECTED'
           ? 'rejected'
           : 'pending'
@@ -366,6 +370,94 @@ app.get('/api/users/role-request-status', requireAuth, async (req, res) => {
     })
   } catch (error) {
     return res.status(500).json({ message: 'Failed to load role request status' })
+  }
+})
+
+app.post('/api/users/role-requests', requireAuth, async (req, res) => {
+  try {
+    const currentRole = String(req.user.role || '').trim().toLowerCase()
+    if (currentRole !== 'warehouse staff') {
+      return res.status(400).json({ message: 'Only warehouse staff can submit a manager role request.' })
+    }
+
+    const requestedRole = String(req.body?.requested_role || 'Manager').trim()
+    if (requestedRole !== 'Manager') {
+      return res.status(400).json({ message: 'Only manager role requests are supported.' })
+    }
+
+    const db = await getDb()
+    const email = String(req.user.email || '').toLowerCase().trim()
+
+    const existingRequest = await db.get(
+      'SELECT status FROM Signup_Verifications WHERE email = ?',
+      email,
+    )
+    if (existingRequest && isPendingRoleRequestStatus(existingRequest.status)) {
+      return res.status(409).json({ message: 'A manager role request is already pending admin approval.' })
+    }
+
+    const userWithPasswordHash = await db.get(
+      'SELECT id, name, email, password_hash FROM Users WHERE id = ?',
+      req.user.id,
+    )
+    if (!userWithPasswordHash) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    await db.run(
+      `
+        INSERT INTO Signup_Verifications (
+          email,
+          name,
+          password_hash,
+          role,
+          status,
+          otp_code,
+          otp_expires_at,
+          reviewed_by,
+          reviewed_at,
+          review_note,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, 'AWAITING_ADMIN_APPROVAL', 'LOGIN_VERIFIED', CURRENT_TIMESTAMP + INTERVAL '10 minutes', NULL, NULL, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (email)
+        DO UPDATE SET
+          name = EXCLUDED.name,
+          password_hash = EXCLUDED.password_hash,
+          role = EXCLUDED.role,
+          status = 'AWAITING_ADMIN_APPROVAL',
+          otp_code = 'LOGIN_VERIFIED',
+          otp_expires_at = EXCLUDED.otp_expires_at,
+          reviewed_by = NULL,
+          reviewed_at = NULL,
+          review_note = EXCLUDED.review_note,
+          created_at = CURRENT_TIMESTAMP
+      `,
+      email,
+      userWithPasswordHash.name,
+      userWithPasswordHash.password_hash,
+      'Manager',
+      'Requested after login by warehouse staff',
+    )
+
+    try {
+      await db.run(
+        `INSERT INTO Role_Audit_Log (action, target_user_id, target_user_email, old_role, new_role, performed_by_id, performed_by_email, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        'ROLE_REQUESTED',
+        userWithPasswordHash.id,
+        email,
+        'Warehouse Staff',
+        'Manager',
+        userWithPasswordHash.id,
+        email,
+        'Manager role requested by user after login',
+      )
+    } catch (_auditErr) { /* non-fatal */ }
+
+    return res.status(201).json({ message: 'Manager role request submitted for admin approval.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to submit manager role request' })
   }
 })
 
@@ -503,6 +595,12 @@ app.post('/api/admin/role-requests/:id/reject', requireAuth, requireRole(ADMIN_R
   }
 
   const reviewNote = String(req.body?.note || 'Rejected by admin').trim()
+  if (!reviewNote) {
+    return res.status(400).json({ message: 'Rejection note is required' })
+  }
+  if (reviewNote.length > 500) {
+    return res.status(400).json({ message: 'Rejection note must be 500 characters or fewer' })
+  }
   const db = await getDb()
 
   try {
@@ -515,7 +613,7 @@ app.post('/api/admin/role-requests/:id/reject', requireAuth, requireRole(ADMIN_R
       return res.status(400).json({ message: 'Role request is not pending admin approval' })
     }
 
-    const pendingForReject = await db.get('SELECT email, role FROM Signup_Verifications WHERE id = ?', requestId)
+    const pendingForReject = await db.get('SELECT email, name, role FROM Signup_Verifications WHERE id = ?', requestId)
 
     await db.run(
       `
@@ -541,6 +639,15 @@ app.post('/api/admin/role-requests/:id/reject', requireAuth, requireRole(ADMIN_R
         reviewNote,
       )
     } catch (_auditErr) { /* non-fatal */ }
+
+    void sendRoleRejectedEmail(
+      pendingForReject ? String(pendingForReject.email).toLowerCase().trim() : '',
+      pendingForReject ? pendingForReject.name : '',
+      pendingForReject ? pendingForReject.role : 'Manager',
+      reviewNote,
+    ).catch((emailError) => {
+      console.error('Failed to send role rejection email:', emailError)
+    })
 
     return res.json({ message: 'Role request rejected' })
   } catch (error) {
@@ -588,7 +695,7 @@ app.post('/api/admin/users/:id/revoke-role', requireAuth, requireRole(ADMIN_ROLE
 
   const db = await getDb()
   try {
-    const targetUser = await db.get('SELECT id, name, email, role FROM Users WHERE id = ?', userId)
+    const targetUser = await db.get('SELECT id, name, email, role, password_hash FROM Users WHERE id = ?', userId)
     if (!targetUser) {
       return res.status(404).json({ message: 'User not found' })
     }
@@ -605,7 +712,52 @@ app.post('/api/admin/users/:id/revoke-role', requireAuth, requireRole(ADMIN_ROLE
       }
     }
 
-    await db.run('UPDATE Users SET role = ? WHERE id = ?', 'Warehouse Staff', userId)
+    await db.exec('BEGIN')
+    try {
+      await db.run('UPDATE Users SET role = ? WHERE id = ?', 'Warehouse Staff', userId)
+
+      await db.run(
+        `
+          INSERT INTO Signup_Verifications (
+            email,
+            name,
+            password_hash,
+            role,
+            status,
+            otp_code,
+            otp_expires_at,
+            reviewed_by,
+            reviewed_at,
+            review_note,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, 'REVOKED', 'ADMIN_REVOKE', CURRENT_TIMESTAMP + INTERVAL '10 minutes', ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT (email)
+          DO UPDATE SET
+            name = EXCLUDED.name,
+            password_hash = EXCLUDED.password_hash,
+            role = EXCLUDED.role,
+            status = 'REVOKED',
+            otp_code = 'ADMIN_REVOKE',
+            otp_expires_at = EXCLUDED.otp_expires_at,
+            reviewed_by = EXCLUDED.reviewed_by,
+            reviewed_at = EXCLUDED.reviewed_at,
+            review_note = EXCLUDED.review_note,
+            created_at = CURRENT_TIMESTAMP
+        `,
+        String(targetUser.email).toLowerCase().trim(),
+        targetUser.name,
+        targetUser.password_hash,
+        'Warehouse Staff',
+        req.user.id,
+        `Role revoked from ${targetUser.role} to Warehouse Staff by admin`,
+      )
+
+      await db.exec('COMMIT')
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
 
     // Audit trail
     try {
@@ -623,9 +775,114 @@ app.post('/api/admin/users/:id/revoke-role', requireAuth, requireRole(ADMIN_ROLE
       )
     } catch (_auditErr) { /* non-fatal */ }
 
+    void sendRoleUpdatedEmail(
+      String(targetUser.email).toLowerCase().trim(),
+      targetUser.name,
+      targetUser.role,
+      'Warehouse Staff',
+      'Your role has been revoked to Warehouse Staff by admin',
+    ).catch((emailError) => {
+      console.error('Failed to send role revoke email:', emailError)
+    })
+
     return res.json({ message: 'User role revoked to Warehouse Staff.' })
   } catch (error) {
     return res.status(500).json({ message: 'Failed to revoke user role' })
+  }
+})
+
+app.post('/api/admin/users/:id/upgrade-role', requireAuth, requireRole(ADMIN_ROLES), async (req, res) => {
+  const userId = Number(req.params.id)
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ message: 'Invalid user id' })
+  }
+
+  const db = await getDb()
+  try {
+    const targetUser = await db.get('SELECT id, name, email, role, password_hash FROM Users WHERE id = ?', userId)
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (String(targetUser.role || '').trim().toLowerCase() !== 'warehouse staff') {
+      return res.status(400).json({ message: 'Only warehouse staff can be upgraded with this action.' })
+    }
+
+    await db.exec('BEGIN')
+    try {
+      await db.run('UPDATE Users SET role = ? WHERE id = ?', 'Manager', userId)
+
+      await db.run(
+        `
+          INSERT INTO Signup_Verifications (
+            email,
+            name,
+            password_hash,
+            role,
+            status,
+            otp_code,
+            otp_expires_at,
+            reviewed_by,
+            reviewed_at,
+            review_note,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, 'APPROVED', 'ADMIN_UPGRADE', CURRENT_TIMESTAMP + INTERVAL '10 minutes', ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT (email)
+          DO UPDATE SET
+            name = EXCLUDED.name,
+            password_hash = EXCLUDED.password_hash,
+            role = EXCLUDED.role,
+            status = 'APPROVED',
+            otp_code = 'ADMIN_UPGRADE',
+            otp_expires_at = EXCLUDED.otp_expires_at,
+            reviewed_by = EXCLUDED.reviewed_by,
+            reviewed_at = EXCLUDED.reviewed_at,
+            review_note = EXCLUDED.review_note,
+            created_at = CURRENT_TIMESTAMP
+        `,
+        String(targetUser.email).toLowerCase().trim(),
+        targetUser.name,
+        targetUser.password_hash,
+        'Manager',
+        req.user.id,
+        'Upgraded directly to Manager by admin',
+      )
+
+      await db.exec('COMMIT')
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
+
+    try {
+      await db.run(
+        `INSERT INTO Role_Audit_Log (action, target_user_id, target_user_email, old_role, new_role, performed_by_id, performed_by_email, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        'ROLE_UPGRADED',
+        targetUser.id,
+        String(targetUser.email).toLowerCase().trim(),
+        'Warehouse Staff',
+        'Manager',
+        req.user.id,
+        String(req.user.email).toLowerCase().trim(),
+        'Role upgraded from Warehouse Staff to Manager by admin',
+      )
+    } catch (_auditErr) { /* non-fatal */ }
+
+    void sendRoleUpdatedEmail(
+      String(targetUser.email).toLowerCase().trim(),
+      targetUser.name,
+      'Warehouse Staff',
+      'Manager',
+      'Your role has been upgraded to Manager by admin',
+    ).catch((emailError) => {
+      console.error('Failed to send role upgrade email:', emailError)
+    })
+
+    return res.json({ message: `${targetUser.name} has been upgraded to Manager.` })
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to upgrade user role' })
   }
 })
 
@@ -742,6 +999,14 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
           kind: 'warning',
           title: 'Role request rejected',
           message: `Your request for ${ownRequest.requested_role} was rejected.`,
+          link: '/profile',
+        })
+      } else if (s === 'REVOKED') {
+        notifications.push({
+          id: 'role-revoked',
+          kind: 'warning',
+          title: 'Role updated by admin',
+          message: `Your access was updated to ${ownRequest.requested_role}.`,
           link: '/profile',
         })
       }

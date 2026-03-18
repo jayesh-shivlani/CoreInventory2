@@ -79,7 +79,7 @@ export type AdminRoleRequest = {
 }
 
 export type UserRoleRequestStatus = {
-  status: 'not_requested' | 'pending' | 'rejected' | 'completed'
+  status: 'not_requested' | 'pending' | 'rejected' | 'revoked' | 'completed'
   requested_role: string | null
   requested_at: string | null
   reviewed_at: string | null
