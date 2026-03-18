@@ -1064,6 +1064,7 @@ function DashboardPage({
   }, [query, token, pushToast])
 
   const activeDashboardFilters = [docType, status, warehouse, category].filter(Boolean).length
+  const dashboardRefreshing = loading
 
   return (
     <section className="dashboard-page">
@@ -1142,7 +1143,7 @@ function DashboardPage({
       <div className="dashboard-header-card">
         <div className="list-header dashboard-section-header">
           <h2>Operational Metrics</h2>
-          {loading && <span className="muted" style={{ fontSize: '12px' }}>Updating…</span>}
+          <SyncStatusChip show={dashboardRefreshing} />
         </div>
         <div className="kpi-grid">
           <KpiCard label="Total Products in Stock" value={kpis.totalProductsInStock} icon="box" />
@@ -1196,6 +1197,23 @@ function KpiCard({ label, value, variant, icon }: { label: string; value: number
       </div>
       <div className="kpi-label">{label}</div>
     </article>
+  )
+}
+
+function SyncStatusChip({
+  show,
+  label = 'Updating...',
+}: {
+  show: boolean
+  label?: string
+}) {
+  if (!show) return null
+
+  return (
+    <span className="sync-status-chip" role="status" aria-live="polite">
+      <span className="sync-status-dot" aria-hidden="true" />
+      {label}
+    </span>
   )
 }
 
@@ -1324,6 +1342,7 @@ function ProductsPage({
     () => Array.from(new Set([...DEFAULT_UOMS, ...filterOptions.uoms, uom].filter(Boolean))),
     [filterOptions.uoms, uom],
   )
+  const productsRefreshing = loading && products.length > 0
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -1538,7 +1557,10 @@ function ProductsPage({
           <div className="list-card product-table-card">
             <div className="list-header">
               <h2>Product List</h2>
-              <p className="muted">{canManageProducts ? 'Click Edit to open a product.' : 'Read-only list. Only admin-approved roles can change products.'}</p>
+              <div className="list-header-meta">
+                <p className="muted">{canManageProducts ? 'Click Edit to open a product.' : 'Read-only list. Only admin-approved roles can change products.'}</p>
+                <SyncStatusChip show={productsRefreshing} />
+              </div>
             </div>
           <div className="data-table-wrap">
             <table className="data-table">
@@ -1555,9 +1577,9 @@ function ProductsPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr className="empty-row"><td colSpan={8}>Loading products…</td></tr>}
+                {loading && products.length === 0 && <tr className="empty-row"><td colSpan={8}>Loading products…</td></tr>}
                 {!loading && products.length === 0 && <tr className="empty-row"><td colSpan={8}>No products found. Click "+ New Product" to create one.</td></tr>}
-                {!loading && products.map((product) => (
+                {products.map((product) => (
                   <Fragment key={product.id}>
                   <tr>
                     <td>
@@ -1999,6 +2021,7 @@ function OperationsPage({
 
   const draftCount = operations.filter((op) => op.status !== 'Done').length
   const doneCount = operations.filter((op) => op.status === 'Done').length
+  const operationsRefreshing = loading && sortedOperations.length > 0
 
   return (
     <section>
@@ -2033,10 +2056,13 @@ function OperationsPage({
           <div className="list-card">
             <div className="list-header">
               <h2>{opLabel} List</h2>
-              <p className="muted">
-                Validate {statBaseLabel.toLowerCase()} normally.
-                {!canDeleteOperations ? ' Delete access is restricted. Please contact admin.' : ` Remove non-done ${statBaseLabel.toLowerCase()}.`}
-              </p>
+              <div className="list-header-meta">
+                <p className="muted">
+                  Validate {statBaseLabel.toLowerCase()} normally.
+                  {!canDeleteOperations ? ' Delete access is restricted. Please contact admin.' : ` Remove non-done ${statBaseLabel.toLowerCase()}.`}
+                </p>
+                <SyncStatusChip show={operationsRefreshing} />
+              </div>
             </div>
           <div className="data-table-wrap">
             <table className="data-table">
@@ -2081,9 +2107,9 @@ function OperationsPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr className="empty-row"><td colSpan={6}>Loading {statBaseLabel.toLowerCase()}…</td></tr>}
+                {loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading {statBaseLabel.toLowerCase()}…</td></tr>}
                 {!loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>No {statBaseLabel.toLowerCase()} yet. Click "+ New {singularOpLabel}" to create one.</td></tr>}
-                {!loading && sortedOperations.map((op) => (
+                {sortedOperations.map((op) => (
                   <tr key={op.id}>
                     <td><strong>{op.reference_number}</strong></td>
                     <td>
@@ -2311,6 +2337,7 @@ function MoveHistoryPage({
     () => entries.reduce((sum, entry) => sum + safeNumber(entry.quantity), 0),
     [entries],
   )
+  const ledgerRefreshing = loading && entries.length > 0
 
   return (
     <section className="move-history-page">
@@ -2339,7 +2366,10 @@ function MoveHistoryPage({
       <div className="list-card">
         <div className="list-header">
           <h2>Stock Ledger</h2>
-          <p className="muted">Auto-refreshed every few seconds.</p>
+          <div className="list-header-meta">
+            <p className="muted">Auto-refreshed every few seconds.</p>
+            <SyncStatusChip show={ledgerRefreshing} />
+          </div>
         </div>
         <div className="data-table-wrap">
           <table className="data-table">
@@ -2355,9 +2385,9 @@ function MoveHistoryPage({
               </tr>
             </thead>
             <tbody>
-              {loading && <tr className="empty-row"><td colSpan={7}>Loading ledger…</td></tr>}
+              {loading && entries.length === 0 && <tr className="empty-row"><td colSpan={7}>Loading ledger…</td></tr>}
               {!loading && entries.length === 0 && <tr className="empty-row"><td colSpan={7}>No stock movements have been recorded yet.</td></tr>}
-              {!loading && entries.map((entry) => (
+              {entries.map((entry) => (
                 <tr key={entry.id}>
                   <td>{formatDate(entry.timestamp)}</td>
                   <td><strong>{entry.product_name}</strong></td>
@@ -2456,6 +2486,7 @@ function WarehousesPage({
   const internalCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'internal').length
   const vendorCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'vendor').length
   const customerCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'customer').length
+  const warehousesRefreshing = loading && warehouses.length > 0
 
   return (
     <section className="warehouses-page">
@@ -2515,7 +2546,10 @@ function WarehousesPage({
         <div className="list-card warehouses-table-card">
           <div className="list-header">
             <h2>Registered Locations</h2>
-            <p className="muted">Delete only when location has no active stock.</p>
+            <div className="list-header-meta">
+              <p className="muted">Delete only when location has no active stock.</p>
+              <SyncStatusChip show={warehousesRefreshing} />
+            </div>
           </div>
           <div className="data-table-wrap">
             <table className="data-table">
@@ -2527,9 +2561,9 @@ function WarehousesPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr className="empty-row"><td colSpan={3}>Loading…</td></tr>}
+                {loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={3}>Loading…</td></tr>}
                 {!loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={3}>No locations configured yet.</td></tr>}
-                {!loading && warehouses.map((wh) => (
+                {warehouses.map((wh) => (
                   <tr key={wh.id}>
                     <td><strong>{wh.name}</strong></td>
                     <td><span className="badge badge-draft">{wh.type}</span></td>
@@ -2746,6 +2780,11 @@ function ProfilePage({
     () => roleRequests.filter((request) => isPendingRoleRequestStatus(request.status)),
     [roleRequests],
   )
+  const profileRefreshing = loading && Boolean(profile)
+  const roleStatusRefreshing = loading && Boolean(roleRequestStatus)
+  const roleRequestsRefreshing = roleRequestsLoading && actionableRoleRequests.length > 0
+  const managedUsersRefreshing = managedUsersLoading && managedUsers.length > 0
+  const auditLogRefreshing = auditLogLoading && auditLog.length > 0
 
   return (
     <section className="profile-page">
@@ -2760,9 +2799,10 @@ function ProfilePage({
         <div className="panel-card profile-card profile-card-full">
           <div className="panel-card-header">Account Details</div>
           <div className="panel-card-body">
-            {loading && <p className="muted">Loading profile…</p>}
+            <SyncStatusChip show={profileRefreshing} />
+            {loading && !profile && <p className="muted">Loading profile…</p>}
             {!loading && !profile && <p className="muted">Unable to load profile. Please try again.</p>}
-            {!loading && profile && (
+            {profile && (
               <div className="info-grid">
                 <dl className="info-item">
                   <dt>Full Name</dt>
@@ -2789,12 +2829,13 @@ function ProfilePage({
           <div className="panel-card profile-card profile-card-full profile-card-role-status">
             <div className="panel-card-header">Role Request Status</div>
             <div className="panel-card-body">
-              {loading && <p className="muted">Loading role request status…</p>}
+              <SyncStatusChip show={roleStatusRefreshing} />
+              {loading && !roleRequestStatus && <p className="muted">Loading role request status…</p>}
               {!loading && !roleRequestStatus && <p className="muted">Unable to load role request status.</p>}
-              {!loading && roleRequestStatus && roleRequestStatus.status === 'not_requested' && (
+              {roleRequestStatus && roleRequestStatus.status === 'not_requested' && (
                 <p className="muted">No elevated-role request has been submitted yet.</p>
               )}
-              {!loading && roleRequestStatus && roleRequestStatus.status !== 'not_requested' && (
+              {roleRequestStatus && roleRequestStatus.status !== 'not_requested' && (
                 <div className="info-grid">
                   <dl className="info-item">
                     <dt>Status</dt>
@@ -2830,7 +2871,10 @@ function ProfilePage({
           <div className="list-card">
             <div className="list-header">
               <h2>Pending Role Requests</h2>
-              <p className="muted">Approve or reject verified requests awaiting admin decision.</p>
+              <div className="list-header-meta">
+                <p className="muted">Approve or reject verified requests awaiting admin decision.</p>
+                <SyncStatusChip show={roleRequestsRefreshing} />
+              </div>
             </div>
             <div className="data-table-wrap">
               <table className="data-table">
@@ -2845,9 +2889,9 @@ function ProfilePage({
                   </tr>
                 </thead>
                 <tbody>
-                  {roleRequestsLoading && <tr className="empty-row"><td colSpan={6}>Loading requests…</td></tr>}
+                  {roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading requests…</td></tr>}
                   {!roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>No pending approvals right now.</td></tr>}
-                  {!roleRequestsLoading && actionableRoleRequests.map((request) => (
+                  {actionableRoleRequests.map((request) => (
                     <tr key={request.id}>
                       <td><strong>{request.name}</strong></td>
                       <td>{request.email}</td>
@@ -2888,7 +2932,10 @@ function ProfilePage({
           <div className="list-card">
             <div className="list-header">
               <h2>Role Access Management</h2>
-              <p className="muted">Manage user roles and accounts. Revoke elevated access or delete users entirely.</p>
+              <div className="list-header-meta">
+                <p className="muted">Manage user roles and accounts. Revoke elevated access or delete users entirely.</p>
+                <SyncStatusChip show={managedUsersRefreshing} />
+              </div>
             </div>
             <div className="data-table-wrap">
               <table className="data-table">
@@ -2902,9 +2949,9 @@ function ProfilePage({
                   </tr>
                 </thead>
                 <tbody>
-                  {managedUsersLoading && <tr className="empty-row"><td colSpan={5}>Loading users…</td></tr>}
+                  {managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={5}>Loading users…</td></tr>}
                   {!managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={5}>No users found.</td></tr>}
-                  {!managedUsersLoading && managedUsers.map((user) => (
+                  {managedUsers.map((user) => (
                     <tr key={user.id}>
                       <td><strong>{user.name}</strong></td>
                       <td>{user.email}</td>
@@ -2951,7 +2998,10 @@ function ProfilePage({
           <div className="list-card">
             <div className="list-header">
               <h2>Role Audit History</h2>
-              <p className="muted">Record of all role approvals, rejections, and revocations.</p>
+              <div className="list-header-meta">
+                <p className="muted">Record of all role approvals, rejections, and revocations.</p>
+                <SyncStatusChip show={auditLogRefreshing} />
+              </div>
             </div>
             <div className="data-table-wrap">
               <table className="data-table">
@@ -2966,9 +3016,9 @@ function ProfilePage({
                   </tr>
                 </thead>
                 <tbody>
-                  {auditLogLoading && <tr className="empty-row"><td colSpan={6}>Loading audit log…</td></tr>}
+                  {auditLogLoading && auditLog.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading audit log…</td></tr>}
                   {!auditLogLoading && auditLog.length === 0 && <tr className="empty-row"><td colSpan={6}>No role actions recorded yet.</td></tr>}
-                  {!auditLogLoading && auditLog.map((entry) => (
+                  {auditLog.map((entry) => (
                     <tr key={entry.id}>
                       <td>
                         <span className={`badge ${entry.action === 'ROLE_APPROVED' ? 'badge-done' : entry.action === 'ROLE_REVOKED' ? 'badge-canceled' : 'badge-draft'}`}>

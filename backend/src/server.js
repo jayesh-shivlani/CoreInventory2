@@ -1,11 +1,14 @@
-require('dotenv').config()
+const path = require('path')
+const dotenv = require('dotenv')
+
+// Always load backend/.env, even when the server is started from repo root.
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') })
+dotenv.config()
 const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
 const dns = require('dns').promises
-const nodemailer = require('nodemailer')
 const fs = require('fs')
-const path = require('path')
 const { buildReference, ensureLocationByName, getDb, initDb } = require('./db')
 const { requireAuth, requireRole, signToken } = require('./auth')
 
@@ -14,8 +17,7 @@ const PORT = Number(process.env.PORT || 4000)
 
 const OTP_TTL_MINUTES = Number(process.env.SIGNUP_OTP_TTL_MINUTES || 10)
 const RESET_OTP_TTL_MINUTES = Number(process.env.RESET_OTP_TTL_MINUTES || 10)
-const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS || 15000)
-const SMTP_MAX_ATTEMPTS = Math.max(1, Number(process.env.SMTP_MAX_ATTEMPTS || 2))
+const EMAIL_TIMEOUT_MS = Number(process.env.EMAIL_TIMEOUT_MS || 15000)
 const STRICT_EMAIL_DOMAIN_CHECK = String(process.env.STRICT_EMAIL_DOMAIN_CHECK || 'false').toLowerCase() === 'true'
 const EXPOSE_DEV_OTP =
   process.env.NODE_ENV !== 'production' &&
@@ -25,8 +27,15 @@ const ADMIN_ROLES = ['Admin']
 const MANAGER_ROLES = ['Manager', 'Admin']
 const PENDING_ROLE_REQUEST_STATUSES = new Set(['AWAITING_ADMIN_APPROVAL', 'PENDING', 'PENDING_ADMIN_APPROVAL'])
 
-let smtpTransporter = null
-let smtpVerified = false
+function getEmailProviderState() {
+  const brevoConfigured = Boolean(process.env.BREVO_API_KEY)
+  return {
+    provider: brevoConfigured ? 'brevo' : 'none',
+    configured: brevoConfigured,
+    sender: process.env.FROM_EMAIL || 'coreinventory.support@gmail.com',
+    brevoOnly: brevoConfigured,
+  }
+}
 
 function isPendingRoleRequestStatus(status) {
   return PENDING_ROLE_REQUEST_STATUSES.has(String(status || '').trim().toUpperCase())
@@ -59,10 +68,6 @@ function getOtpExpiryIso() {
   return new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString()
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 function withTimeout(promise, timeoutMs, timeoutLabel = 'Request timed out') {
   return Promise.race([
     promise,
@@ -72,94 +77,20 @@ function withTimeout(promise, timeoutMs, timeoutLabel = 'Request timed out') {
   ])
 }
 
-function isRetryableSmtpError(error) {
-  const msg = String(error?.message || '').toLowerCase()
-  const code = String(error?.code || '').toLowerCase()
-  return (
-    code === 'etimedout' ||
-    code === 'econnreset' ||
-    code === 'econnrefused' ||
-    code === 'eai_again' ||
-    msg.includes('timed out') ||
-    msg.includes('timeout') ||
-    msg.includes('econnreset') ||
-    msg.includes('econnrefused') ||
-    msg.includes('etimedout') ||
-    msg.includes('eai_again')
-  )
-}
-
 function toOtpDeliveryMessage(error) {
-  const msg = String(error?.message || '')
-  const lower = msg.toLowerCase()
-  const code = String(error?.code || '').toLowerCase()
-
-  if (lower.includes('smtp is not configured')) {
+  const lower = String(error?.message || '').toLowerCase()
+  if (lower.includes('brevo')) {
+    return 'Brevo email delivery failed. Please verify your Brevo API key and sender domain.'
+  }
+  if (lower.includes('email service is not configured')) {
     return 'Email service is not configured. Please contact support.'
   }
-
-  if (code === 'eauth' || lower.includes('invalid login') || lower.includes('username and password not accepted')) {
-    return 'Gmail authentication failed. Use SMTP_USER as your Gmail address and SMTP_PASS as a valid Gmail app password.'
-  }
-
-  if (code === 'etimedout' || code === 'econnrefused' || lower.includes('connection timeout')) {
-    return 'Could not connect to Gmail SMTP from the server. Please try again shortly.'
-  }
-
   return 'OTP email service is unavailable right now. Please try again.'
-}
-
-function buildSmtpTransporter() {
-  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com'
-  const smtpPort = Number(process.env.SMTP_PORT || 587)
-  const smtpUser = process.env.SMTP_USER
-  const smtpPass = process.env.SMTP_PASS
-
-  if (!smtpUser || !smtpPass) {
-    return null
-  }
-
-  const isGmail = smtpHost === 'smtp.gmail.com'
-
-  return nodemailer.createTransport({
-    service: isGmail ? 'gmail' : undefined,
-    host: !isGmail ? smtpHost : undefined,
-    port: smtpPort,
-    secure: smtpPort === 465,
-    auth: {
-      user: smtpUser,
-      pass: smtpPass,
-    },
-    connectionTimeout: SMTP_TIMEOUT_MS,
-    greetingTimeout: SMTP_TIMEOUT_MS,
-    socketTimeout: SMTP_TIMEOUT_MS,
-  })
-}
-
-async function getVerifiedSmtpTransporter() {
-  if (!smtpTransporter) {
-    smtpTransporter = buildSmtpTransporter()
-  }
-
-  if (!smtpTransporter) {
-    return null
-  }
-
-  if (!smtpVerified) {
-    await withTimeout(
-      smtpTransporter.verify(),
-      SMTP_TIMEOUT_MS,
-      'SMTP verify timed out',
-    )
-    smtpVerified = true
-  }
-
-  return smtpTransporter
 }
 
 async function sendOtpBrevo(toEmail, otp, purpose = 'password reset') {
   const apiKey = process.env.BREVO_API_KEY
-  const fromEmail = process.env.FROM_EMAIL || process.env.SMTP_USER || 'coreinventory.support@gmail.com'
+  const fromEmail = process.env.FROM_EMAIL || 'coreinventory.support@gmail.com'
   const fromName = 'Core Inventory'
 
   if (!apiKey) return null
@@ -180,7 +111,7 @@ async function sendOtpBrevo(toEmail, otp, purpose = 'password reset') {
           htmlContent: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
         }),
       }),
-      SMTP_TIMEOUT_MS,
+      EMAIL_TIMEOUT_MS,
       'Brevo API timed out',
     )
 
@@ -196,114 +127,93 @@ async function sendOtpBrevo(toEmail, otp, purpose = 'password reset') {
   }
 }
 
-async function sendOtpResend(toEmail, otp, purpose = 'password reset') {
-  const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.FROM_EMAIL || 'onboarding@resend.dev'
+async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
+  const emailState = getEmailProviderState()
+  if (!emailState.configured) {
+    if (EXPOSE_DEV_OTP) {
+      console.warn(`[DEV] Brevo is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
+      return { delivered: false, exposed: true }
+    }
+    throw new Error('Email service is not configured')
+  }
 
+  const brevoDelivery = await sendOtpBrevo(toEmail, otp, purpose)
+  if (brevoDelivery && brevoDelivery.delivered) {
+    return brevoDelivery
+  }
+
+  throw new Error('Brevo email delivery failed')
+}
+
+function getAuthPageLink() {
+  const base = String(process.env.CLIENT_ORIGIN || '').trim()
+  if (!base) return ''
+  return `${base.replace(/\/$/, '')}/auth`
+}
+
+async function sendRoleApprovedBrevo(toEmail, recipientName, approvedRole) {
+  const apiKey = process.env.BREVO_API_KEY
+  const fromEmail = process.env.FROM_EMAIL || 'coreinventory.support@gmail.com'
+  const fromName = 'Core Inventory'
   if (!apiKey) return null
+
+  const authLink = getAuthPageLink()
+  const safeName = String(recipientName || '').trim() || 'there'
+  const roleName = String(approvedRole || 'Manager').trim()
+  const linkHtml = authLink ? `<p>You can sign in here: <a href="${authLink}">${authLink}</a></p>` : ''
 
   try {
     const response = await withTimeout(
-      fetch('https://api.resend.com/emails', {
+      fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'api-key': apiKey,
           'Content-Type': 'application/json',
+          Accept: 'application/json',
         },
         body: JSON.stringify({
-          from,
-          to: toEmail,
-          subject: `Core Inventory OTP for ${purpose}`,
-          html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
+          sender: { name: fromName, email: fromEmail },
+          to: [{ email: toEmail }],
+          subject: 'Your role request has been approved',
+          htmlContent: `<p>Hi ${safeName},</p><p>Your request for the <strong>${roleName}</strong> role has been approved by an admin.</p>${linkHtml}<p>Thanks,<br/>Core Inventory Team</p>`,
         }),
       }),
-      SMTP_TIMEOUT_MS,
-      'Resend API timed out',
+      EMAIL_TIMEOUT_MS,
+      'Brevo API timed out',
     )
 
-    const data = await response.json()
     if (response.ok) {
       return { delivered: true }
     }
-    console.error('Resend API error:', data)
+    const data = await response.json().catch(() => null)
+    console.error('Brevo role approval email error:', data)
     return null
   } catch (error) {
-    console.error('Resend API failed:', error)
+    console.error('Brevo role approval email failed:', error)
     return null
   }
 }
 
-async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
-  const from = process.env.FROM_EMAIL || process.env.SMTP_USER || 'coreinventory.support@gmail.com'
-  const isProduction = process.env.NODE_ENV === 'production'
-  let smtpError = null
+async function sendRoleApprovedEmail(toEmail, recipientName, approvedRole) {
+  const normalizedEmail = String(toEmail || '').toLowerCase().trim()
+  const safeName = String(recipientName || '').trim() || 'there'
+  const roleName = String(approvedRole || 'Manager').trim()
+  const emailState = getEmailProviderState()
 
-  // Try Brevo first if configured (Best for Render/Cloud)
-  if (process.env.BREVO_API_KEY) {
-    const brevoDelivery = await sendOtpBrevo(toEmail, otp, purpose)
-    if (brevoDelivery && brevoDelivery.delivered) {
-      return brevoDelivery
-    }
+  if (!normalizedEmail) {
+    return { delivered: false }
   }
 
-  // Try Resend as second choice
-  if (process.env.RESEND_API_KEY) {
-    const resendDelivery = await sendOtpResend(toEmail, otp, purpose)
-    if (resendDelivery && resendDelivery.delivered) {
-      return resendDelivery
-    }
+  if (!emailState.configured) {
+    return { delivered: false }
   }
 
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    if (isProduction) {
-      throw new Error('SMTP is not configured')
-    }
-    console.warn(`[DEV] Email service is not configured. OTP for ${toEmail} (${purpose}) is ${otp}`)
-    return { delivered: false, exposed: true }
+  const brevoDelivery = await sendRoleApprovedBrevo(normalizedEmail, safeName, roleName)
+  if (brevoDelivery && brevoDelivery.delivered) {
+    return brevoDelivery
   }
 
-  for (let attempt = 1; attempt <= SMTP_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      const transporter = await getVerifiedSmtpTransporter()
-      if (!transporter) {
-        throw new Error('SMTP is not configured')
-      }
-
-      await withTimeout(
-        transporter.sendMail({
-          from,
-          to: toEmail,
-          subject: `Core Inventory OTP for ${purpose}`,
-          text: `Your OTP code is ${otp}. It is required to complete your ${purpose}.`,
-          html: `<p>Your OTP code is <strong>${otp}</strong>.</p><p>Use this code to complete your ${purpose}.</p>`,
-        }),
-        SMTP_TIMEOUT_MS,
-        'SMTP send timed out',
-      )
-
-      return { delivered: true }
-    } catch (error) {
-      smtpError = error
-      smtpVerified = false
-      smtpTransporter = null
-      console.error(`SMTP email attempt ${attempt}/${SMTP_MAX_ATTEMPTS} failed:`, error)
-
-      const shouldRetry = attempt < SMTP_MAX_ATTEMPTS && isRetryableSmtpError(error)
-      if (shouldRetry) {
-        await sleep(400 * attempt)
-        continue
-      }
-
-      break
-    }
-  }
-
-  if (!isProduction && EXPOSE_DEV_OTP) {
-    console.warn(`[DEV] Falling back to local OTP mode for ${toEmail} (${purpose})`)
-    return { delivered: false, exposed: true }
-  }
-
-  throw smtpError || new Error('Email service failed to deliver OTP')
+  throw new Error('Brevo role approval email delivery failed')
 }
 
 const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || '')
@@ -337,13 +247,13 @@ app.use(express.json())
 app.get('/api/health', async (req, res) => {
   const db = await getDb()
   const row = await db.get('SELECT datetime("now") AS now')
-  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS)
+  const emailState = getEmailProviderState()
   res.json({
     status: 'ok',
     databaseTime: row.now,
-    emailProvider: 'smtp',
-    emailConfigured: smtpConfigured,
-    emailSender: process.env.FROM_EMAIL || process.env.SMTP_USER || null,
+    emailProvider: emailState.provider,
+    emailConfigured: emailState.configured,
+    emailSender: emailState.sender,
   })
 })
 
@@ -743,6 +653,14 @@ app.post('/api/admin/role-requests/:id/approve', requireAuth, requireRole(ADMIN_
           `Approved role request for ${pending.role}`,
         )
       } catch (_auditErr) { /* non-fatal */ }
+
+      void sendRoleApprovedEmail(
+        String(pending.email).toLowerCase().trim(),
+        pending.name,
+        pending.role,
+      ).catch((emailError) => {
+        console.error('Failed to send role approval email:', emailError)
+      })
 
       return res.json({ message: `Role request approved. User can now access ${pending.role} permissions.` })
     } catch (error) {

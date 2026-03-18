@@ -16,7 +16,7 @@ Backend API for Core Inventory IMS, built with Node.js + Express and PostgreSQL.
 - Framework: Express
 - Database: PostgreSQL (`pg`)
 - Auth: `jsonwebtoken`, `bcryptjs`
-- Email OTP: `resend` (optional)
+- Email OTP: Brevo API
 
 ## Project Layout
 
@@ -49,8 +49,9 @@ Important optional:
 - `PORT` : server port (default `4000`)
 - `JWT_SECRET` : JWT signing secret
 - `ALLOWED_ORIGINS` : comma-separated list of allowed browser origins
-- `RESEND_API_KEY` : enable OTP email delivery
+- `BREVO_API_KEY` : enable OTP email delivery
 - `FROM_EMAIL` : sender identity for OTP emails
+- `EMAIL_TIMEOUT_MS` : outbound email timeout in milliseconds (default `15000`)
 - `FRONTEND_DIST_PATH` : static frontend path for production serving
 - `SIGNUP_OTP_TTL_MINUTES` : signup OTP validity window (default `10`)
 - `RESET_OTP_TTL_MINUTES` : reset OTP validity window (default `10`)
