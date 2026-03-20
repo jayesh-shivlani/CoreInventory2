@@ -5,8 +5,8 @@ This directory contains product and engineering documentation for Core Inventory
 ## Files
 
 - `PRD.md` : Product Requirements Document
-- `BRD.md` : Business Requirements Document
-- `FRD.md` : Functional Requirements Document
+- `BRD.md` : Backend Requirements Document
+- `FRD.md` : Frontend Requirements Document
 - `TRD.md` : Technical Requirements Document
 - `AFD.md` : Application Flow Document
 
