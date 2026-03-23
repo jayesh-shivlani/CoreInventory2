@@ -1,5 +1,41 @@
+# Dependencies
 node_modules/
+
+# Environment and local config (keep examples tracked)
 .env
+.env.*
+*.env
 *.local
+!.env.example
+!**/.env.example
+
+# Build outputs
 dist/
 dist-ssr/
+build/
+coverage/
+
+# Logs and temp files
+logs/
+*.log
+*.tmp
+*.temp
+.tmp*
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+
+# Database artifacts
+*.db
+*.db-shm
+*.db-wal
+
+# Certificate and key material
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt

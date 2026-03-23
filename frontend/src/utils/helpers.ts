@@ -1,3 +1,8 @@
+/**
+ * Shared frontend utility helpers.
+ * Wraps API requests, formatting helpers, and operation-path mapping logic.
+ */
+
 import { API_BASE, AUTH_INVALID_EVENT } from '../config/constants'
 import type { OperationKind } from '../types/models'
 

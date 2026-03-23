@@ -1,3 +1,8 @@
+/**
+ * Role-approval verification smoke test.
+ * Exercises registration, OTP verification, and admin approval flows.
+ */
+
 require('dotenv').config({ path: './.env' })
 const { getDb } = require('../src/db')
 

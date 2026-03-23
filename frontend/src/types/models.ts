@@ -1,3 +1,8 @@
+/**
+ * Shared frontend domain types.
+ * Contains API response and UI model contracts used across pages.
+ */
+
 export type KPIResponse = {
   totalProductsInStock: number
   lowOrOutOfStockItems: number

@@ -1,3 +1,8 @@
+/**
+ * Vite configuration for the frontend application.
+ * Sets plugin registration and local API proxy behavior.
+ */
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 

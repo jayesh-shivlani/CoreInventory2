@@ -1,7 +1,19 @@
+/**
+ * Reports and analytics dashboard module.
+ * Renders KPI widgets, charts, and CSV export actions.
+ */
+
 import { useEffect, useState, useCallback } from 'react'
 import { API_BASE, LIVE_SYNC_INTERVAL_MS } from './config/constants'
 import { apiRequest } from './utils/helpers'
 import type { AnalyticsOverview, Toast } from './types/models'
+
+type HoverState = {
+  x: number
+  y: number
+  label: string
+  value: string
+}
 
 export async function downloadCSV(
   path: string,
@@ -15,6 +27,7 @@ export async function downloadCSV(
     })
     if (!resp.ok) throw new Error('Export failed')
     const blob = await resp.blob()
+    // Trigger a browser download without navigating away from the current page.
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -39,6 +52,7 @@ function BarChart({
   emptyMsg?: string
 }) {
   if (!data.length) return <div className="chart-empty">{emptyMsg}</div>
+  const [hover, setHover] = useState<HoverState | null>(null)
 
   const maxVal = Math.max(...data.map((d) => d.value), 1)
   const W = 680
@@ -50,11 +64,13 @@ function BarChart({
   const plotW = W - padL - padR
   const plotH = H - padT - padB
   const n = data.length
+  // Keep bars readable for both short and long series by dynamically sizing step and bar width.
   const step = plotW / n
   const barW = Math.max(4, Math.min(28, step * 0.62))
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
+    <div className="chart-shell" onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
       {[0.25, 0.5, 0.75, 1].map((r) => {
         const y = padT + plotH * (1 - r)
         return (
@@ -72,9 +88,39 @@ function BarChart({
         const bh = Math.max(2, (d.value / maxVal) * plotH)
         const x = padL + i * step + (step - barW) / 2
         const y = padT + plotH - bh
+        const label = `${d.label}`
+        const value = d.value.toLocaleString()
         return (
           <g key={i}>
-            <rect x={x} y={y} width={barW} height={bh} fill={color} rx="2" opacity="0.85">
+            <rect
+              x={x}
+              y={y}
+              width={barW}
+              height={bh}
+              fill={color}
+              rx="2"
+              opacity="0.85"
+              className="rep-bar"
+              onMouseMove={(evt) => {
+                const bounds = (evt.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect()
+                setHover({
+                  x: evt.clientX - bounds.left + 12,
+                  y: evt.clientY - bounds.top - 10,
+                  label,
+                  value,
+                })
+              }}
+              onFocus={() => {
+                setHover({
+                  x: x + barW / 2,
+                  y,
+                  label,
+                  value,
+                })
+              }}
+              onBlur={() => setHover(null)}
+              tabIndex={0}
+            >
               <title>{d.label}: {d.value}</title>
             </rect>
             {n <= 20 && (
@@ -91,7 +137,14 @@ function BarChart({
           </g>
         )
       })}
-    </svg>
+      </svg>
+      {hover && (
+        <div className="chart-tooltip" style={{ left: hover.x, top: hover.y }}>
+          <strong>{hover.label}</strong>
+          <span>{hover.value}</span>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -103,18 +156,30 @@ function HBars({
   color?: string
 }) {
   if (!data.length) return <div className="chart-empty">No category data.</div>
+  const [active, setActive] = useState<number | null>(null)
   const maxVal = Math.max(...data.map((d) => d.value), 1)
 
   return (
     <div className="hbars">
       {data.map((d, i) => (
-        <div key={i} className="hbar-row">
+        <div
+          key={i}
+          className={`hbar-row${active === i ? ' is-active' : ''}`}
+        >
           <span className="hbar-label" title={d.label}>{d.label}</span>
           <div className="hbar-track">
             <div
               className="hbar-fill"
               style={{ width: `${Math.max((d.value / maxVal) * 100, 2)}%`, background: color }}
+              onMouseEnter={() => setActive(i)}
+              onMouseLeave={() => setActive(null)}
+              onFocus={() => setActive(i)}
+              onBlur={() => setActive(null)}
+              tabIndex={0}
             />
+            {active === i && (
+              <div className="hbar-tooltip">{d.value.toLocaleString()}</div>
+            )}
           </div>
           <span className="hbar-val">{d.value.toLocaleString()}</span>
         </div>
@@ -147,6 +212,7 @@ export default function ReportsPage({
 
   useEffect(() => {
     void load()
+    // Reports are heavier to query than dashboard tiles, so poll less frequently.
     const t = setInterval(load, LIVE_SYNC_INTERVAL_MS * 4)
     return () => clearInterval(t)
   }, [load])
@@ -178,9 +244,12 @@ export default function ReportsPage({
       <div className="reports-header">
         <div className="product-title-block">
           <h2>Reports &amp; Analytics</h2>
-          <p>Stock movement trends, inventory health, and export tools.</p>
+          <p>Stock movement trends, inventory health, and export tools for operational decisions.</p>
         </div>
         <div className="reports-export-row">
+          <button type="button" className="btn btn-primary" onClick={() => void load()}>
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
           <button
             type="button"
             className="btn btn-secondary"
@@ -292,6 +361,7 @@ export default function ReportsPage({
                           width: `${(op.done_count / Math.max(op.total, 1)) * 100}%`,
                           background: OP_COLORS[op.type] ?? 'var(--accent)',
                         }}
+                        title={`${op.type}: ${op.done_count}/${op.total} done`}
                       />
                     </div>
                     <span className="ops-stat-val">{op.done_count}/{op.total} done</span>

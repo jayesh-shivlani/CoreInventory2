@@ -1,3 +1,8 @@
+/**
+ * Promise timeout helper.
+ * Wraps async operations and rejects when the timeout window is exceeded.
+ */
+
 function withTimeout(promise, timeoutMs, timeoutLabel = 'Request timed out') {
   return Promise.race([
     promise,

@@ -1,7 +1,15 @@
+/**
+ * Authentication helpers and middleware.
+ * Provides JWT signing, verification, and role-based route guards.
+ */
+
 const jwt = require('jsonwebtoken')
 const { getDb } = require('./db')
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production'
+const JWT_SECRET = String(process.env.JWT_SECRET || '').trim()
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is required')
+}
 
 function signToken(user) {
   return jwt.sign(
@@ -27,6 +35,7 @@ async function requireAuth(req, res, next) {
 
     const payload = jwt.verify(token, JWT_SECRET)
     const db = await getDb()
+  // Resolve the user from storage on each request so deleted/deactivated users cannot continue with old tokens.
     const user = await db.get('SELECT id, name, email, role FROM Users WHERE id = ?', payload.sub)
 
     if (!user) {
@@ -41,6 +50,7 @@ async function requireAuth(req, res, next) {
 }
 
 function requireRole(allowedRoles = []) {
+  // Normalize once when middleware is created to avoid repeated per-request string cleanup.
   const normalized = new Set(
     (Array.isArray(allowedRoles) ? allowedRoles : [])
       .map((role) => String(role || '').trim().toLowerCase())

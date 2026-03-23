@@ -1,3 +1,8 @@
+/**
+ * Frontend bootstrap entry.
+ * Mounts the React application and root router into the DOM.
+ */
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'

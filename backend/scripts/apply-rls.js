@@ -1,3 +1,8 @@
+/**
+ * RLS policy bootstrap script.
+ * Enables row-level security and reconciles table policies in PostgreSQL.
+ */
+
 require('dotenv').config()
 const { Pool } = require('pg')
 

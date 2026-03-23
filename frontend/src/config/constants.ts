@@ -1,3 +1,8 @@
+/**
+ * Frontend constants.
+ * Defines API endpoints, storage keys, timing intervals, and default options.
+ */
+
 export const TOKEN_KEY = 'ims-auth-token'
 export const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '/api').replace(/\/$/, '')
 export const LIVE_SYNC_INTERVAL_MS = 8000

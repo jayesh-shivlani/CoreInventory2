@@ -1,3 +1,8 @@
+/**
+ * Main frontend application shell.
+ * Hosts routing, layout, page composition, and shared state orchestration.
+ */
+
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
@@ -11,6 +16,7 @@ import {
 } from 'react-router-dom'
 import { AUTH_INVALID_EVENT, DEFAULT_CATEGORIES, DEFAULT_UOMS, LIVE_SYNC_INTERVAL_MS, TOKEN_KEY } from './config/constants'
 import ReportsPage, { downloadCSV } from './ReportsPage'
+import { useConfirm } from './components/ConfirmModal'
 import {
   apiRequest,
   formatDate,
@@ -63,6 +69,7 @@ function App() {
     }
 
     loadCurrentUser()
+  // Keep profile/role state fresh so role-gated UI updates without requiring a full reload.
     const timer = setInterval(loadCurrentUser, LIVE_SYNC_INTERVAL_MS)
 
     return () => {
@@ -94,6 +101,7 @@ function App() {
   useEffect(() => {
     const handleAuthInvalid = (event: Event) => {
       const detail = (event as CustomEvent<{ message?: string }>).detail
+      // Centralized forced logout path used by API helper when token becomes invalid.
       localStorage.removeItem(TOKEN_KEY)
       setToken(null)
       setCurrentUser(null)
@@ -210,6 +218,7 @@ function ProtectedLayout({
     const hasNew = notifications.some((n) => !knownNotificationIdsRef.current.has(n.id))
     knownNotificationIdsRef.current = nextIds
 
+    // Play sound only for new arrivals, not for initial list hydration.
     if (hasNew) {
       playNotificationTing()
     }
@@ -236,6 +245,7 @@ function ProtectedLayout({
   const segments = location.pathname
     .split('/')
     .filter(Boolean)
+    // Build human-readable breadcrumbs from route segments (e.g. move-history -> Move History).
     .map((chunk) =>
       chunk.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
     )
@@ -314,7 +324,7 @@ function ProtectedLayout({
             <span>Inventory</span>
             {segments.map((seg, i) => (
               <span key={i}>
-                <span className="sep">›</span>
+                <span className="sep">{'>'}</span>
                 <span className={i === segments.length - 1 ? 'current' : ''}>{seg}</span>
               </span>
             ))}
@@ -354,7 +364,7 @@ function ProtectedLayout({
                           </div>
                           <div className="notif-item-actions">
                             <a className="notif-view-link" href={n.link} onClick={() => setNotifOpen(false)}>View</a>
-                            <button type="button" className="notif-dismiss" aria-label="Dismiss" onClick={() => setDismissed((prev) => new Set([...prev, n.id]))}>×</button>
+                            <button type="button" className="notif-dismiss" aria-label="Dismiss" onClick={() => setDismissed((prev) => new Set([...prev, n.id]))}>x</button>
                           </div>
                         </li>
                       ))}
@@ -384,6 +394,7 @@ function isAdminRole(role: string | undefined | null): boolean {
 }
 
 function isPendingRoleRequestStatus(status: string | undefined | null): boolean {
+  // Support legacy and current backend status values during schema transitions.
   const normalized = String(status || '').trim().toUpperCase()
   return normalized === 'AWAITING_ADMIN_APPROVAL' || normalized === 'PENDING' || normalized === 'PENDING_ADMIN_APPROVAL'
 }
@@ -487,18 +498,13 @@ function AuthPage({
 
     setResetBusy(true)
     try {
-      const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/reset-password', 'POST', undefined, {
+      await apiRequest<{ message?: string }>('/auth/reset-password', 'POST', undefined, {
         email: resetEmail,
       })
       setResetStep('verify')
       setOtpSentTo(resetEmail.trim())
       setResendCooldown(30)
-      if (response?.dev_otp) {
-        setResetOtp(response.dev_otp)
-        pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
-      } else {
-        pushToast('info', 'OTP sent to your email')
-      }
+      pushToast('info', 'OTP sent to your email')
     } catch (error) {
       pushToast('error', (error as Error).message)
     } finally {
@@ -585,7 +591,7 @@ function AuthPage({
 
       if (mode === 'signup') {
         if (signupStep === 'request') {
-          const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/register', 'POST', undefined, {
+          await apiRequest<{ message?: string }>('/auth/register', 'POST', undefined, {
             name,
             email,
             password,
@@ -595,12 +601,7 @@ function AuthPage({
           setSignupStep('verify')
           setSignupOtpSentTo(email.trim())
           setSignupResendCooldown(30)
-          if (response?.dev_otp) {
-            setSignupOtp(response.dev_otp)
-            pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
-          } else {
-            pushToast('info', 'OTP sent to your email')
-          }
+          pushToast('info', 'OTP sent to your email')
         } else {
           if (!signupOtp.trim()) {
             pushToast('error', 'OTP is required to verify your email')
@@ -709,7 +710,7 @@ function AuthPage({
             </div>
             <div className="form-field">
               <label className="form-field-label">Password</label>
-              <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={mode === 'signup' ? 8 : 6} />
+              <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="********" required minLength={mode === 'signup' ? 8 : 6} />
             </div>
 
             {mode === 'signup' && (
@@ -718,7 +719,7 @@ function AuthPage({
                 <input className="form-input" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter password" required minLength={8} />
                 {confirmPassword && (
                   <p className={password === confirmPassword ? 'password-match' : 'password-mismatch'}>
-                    {password === confirmPassword ? '✓ Passwords match' : '✗ Passwords do not match'}
+                    {password === confirmPassword ? '[OK] Passwords match' : '[X] Passwords do not match'}
                   </p>
                 )}
                 <p className="password-help">Use at least 8 characters and include both letters and numbers.</p>
@@ -746,19 +747,14 @@ function AuthPage({
                       }
 
                       try {
-                        const response = await apiRequest<{ message?: string; dev_otp?: string }>('/auth/register', 'POST', undefined, {
+                        await apiRequest<{ message?: string }>('/auth/register', 'POST', undefined, {
                           name,
                           email,
                           password,
                           role: requestedRole,
                         })
                         setSignupResendCooldown(30)
-                        if (response?.dev_otp) {
-                          setSignupOtp(response.dev_otp)
-                          pushToast('info', `Email provider test mode: use OTP ${response.dev_otp}`)
-                        } else {
-                          pushToast('info', 'OTP resent to your email')
-                        }
+                        pushToast('info', 'OTP resent to your email')
                       } catch (error) {
                         pushToast('error', (error as Error).message)
                       }
@@ -772,7 +768,7 @@ function AuthPage({
 
             <button type="submit" className="btn btn-primary auth-submit-btn" disabled={busy}>
               {busy
-                ? 'Please wait…'
+                ? 'Please wait...'
                 : mode === 'login'
                   ? 'Sign In'
                   : signupStep === 'request'
@@ -821,7 +817,7 @@ function AuthPage({
                       <input className="form-input" type="password" value={resetConfirmPassword} onChange={(e) => setResetConfirmPassword(e.target.value)} minLength={8} required />
                       {resetConfirmPassword && (
                         <p className={resetNewPassword === resetConfirmPassword ? 'password-match' : 'password-mismatch'}>
-                          {resetNewPassword === resetConfirmPassword ? '✓ Passwords match' : '✗ Passwords do not match'}
+                          {resetNewPassword === resetConfirmPassword ? '[OK] Passwords match' : '[X] Passwords do not match'}
                         </p>
                       )}
                     </div>
@@ -829,11 +825,11 @@ function AuthPage({
                 )}
                 <div className="auth-reset-actions">
                   <button type="button" className="btn btn-secondary" onClick={requestResetOtp} disabled={resetBusy || resendCooldown > 0}>
-                    {resetBusy ? 'Sending…' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resetStep === 'request' ? 'Send OTP' : 'Resend OTP'}
+                    {resetBusy ? 'Sending...' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resetStep === 'request' ? 'Send OTP' : 'Resend OTP'}
                   </button>
                   {resetStep === 'verify' && (
                     <button type="button" className="btn btn-primary" onClick={submitPasswordReset} disabled={resetBusy}>
-                      {resetBusy ? 'Resetting…' : 'Reset Password'}
+                      {resetBusy ? 'Resetting...' : 'Reset Password'}
                     </button>
                   )}
                 </div>
@@ -954,7 +950,7 @@ function DashboardPage({
   return (
     <section className="dashboard-page">
 
-      {/* ── Filters ── */}
+      {/* -- Filters -- */}
       <div className="dashboard-header-card">
         <div className="list-header dashboard-section-header">
           <h2>Dashboard Filters</h2>
@@ -1004,7 +1000,7 @@ function DashboardPage({
         </div>
       </div>
 
-      {/* ── Hero summary ── */}
+      {/* -- Hero summary -- */}
       <div className="dashboard-hero-card">
         <div className="dashboard-title">Inventory Dashboard</div>
         <p className="dashboard-subtitle">Realtime status of inventory, operations, and transfer workload.</p>
@@ -1024,7 +1020,7 @@ function DashboardPage({
         </div>
       </div>
 
-      {/* ── KPI Cards ── */}
+      {/* -- KPI Cards -- */}
       <div className="dashboard-header-card">
         <div className="list-header dashboard-section-header">
           <h2>Operational Metrics</h2>
@@ -1039,7 +1035,7 @@ function DashboardPage({
         </div>
       </div>
 
-      {/* ── Low Stock Alerts ── */}
+      {/* -- Low Stock Alerts -- */}
       {lowStockProducts.length > 0 && (
         <div className="dashboard-header-card low-stock-alert-card">
           <div className="list-header dashboard-section-header">
@@ -1111,6 +1107,7 @@ function ProductsPage({
   pushToast: (kind: Toast['kind'], text: string) => void
   currentUser: UserProfile | null
 }) {
+  const { modal, confirm } = useConfirm()
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -1291,7 +1288,8 @@ function ProductsPage({
       pushToast('error', 'Only admin-approved roles can change products. Please contact admin.')
       return
     }
-    if (!window.confirm('Are you sure you want to delete this product?')) return
+    const ok = await confirm('Delete this product?', 'This action cannot be undone.')
+    if (!ok) return
 
     setSaving(true)
     try {
@@ -1355,6 +1353,7 @@ function ProductsPage({
 
   return (
     <section className="product-page">
+      {modal}
       {viewMode === 'list' && (
         <>
           <div className="product-overview">
@@ -1471,7 +1470,7 @@ function ProductsPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && products.length === 0 && <tr className="empty-row"><td colSpan={8}>Loading products…</td></tr>}
+                {loading && products.length === 0 && <tr className="empty-row"><td colSpan={8}>Loading products...</td></tr>}
                 {!loading && products.length === 0 && <tr className="empty-row"><td colSpan={8}>No products found. Click "+ New Product" to create one.</td></tr>}
                 {products.map((product) => (
                   <Fragment key={product.id}>
@@ -1486,7 +1485,7 @@ function ProductsPage({
                     <td>{product.category}</td>
                     <td>{product.unit_of_measure}</td>
                     <td>{safeNumber(product.availableStock)}</td>
-                    <td>{product.locationName ?? '—'}</td>
+                    <td>{product.locationName ?? '-'}</td>
                     <td>
                       <span className={`badge ${safeNumber(product.availableStock) <= safeNumber(product.reorder_minimum) ? 'badge-waiting' : 'badge-done'}`}>
                         {safeNumber(product.availableStock) <= safeNumber(product.reorder_minimum) ? 'Low Stock' : 'In Stock'}
@@ -1507,7 +1506,7 @@ function ProductsPage({
                   <tr>
                     <td colSpan={8}>
                       <div className="inline-stock-card">
-                        {stockLoadingForProductId === product.id && <p className="muted">Loading location-wise stock…</p>}
+                        {stockLoadingForProductId === product.id && <p className="muted">Loading location-wise stock...</p>}
                         {stockLoadingForProductId !== product.id && (stockByProductId[product.id] || []).length === 0 && (
                           <p className="muted">No location-wise stock found for this product.</p>
                         )}
@@ -1546,7 +1545,7 @@ function ProductsPage({
         <form onSubmit={submit}>
           <div className="control-bar">
             <div className="control-bar-left">
-              <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+              <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
               <button type="button" className="btn btn-secondary" onClick={() => { resetForm(); setViewMode('list') }}>Discard</button>
             </div>
             {editingProductId && (
@@ -1577,7 +1576,7 @@ function ProductsPage({
                 <div className="field-group">
                   <label className="field-label">Category</label>
                   <select className="form-select" value={category} onChange={(e) => setCategory(e.target.value)} required>
-                    <option value="">Select category…</option>
+                    <option value="">Select category...</option>
                     {categoryOptions.map((value) => (
                       <option key={value} value={value}>{value}</option>
                     ))}
@@ -1642,6 +1641,7 @@ function OperationsPage({
   pushToast: (kind: Toast['kind'], text: string) => void
   currentUser: UserProfile | null
 }) {
+  const { modal, confirm } = useConfirm()
   const location = useLocation()
   const operationType = toOperationKind(location.pathname)
 
@@ -1918,7 +1918,11 @@ function OperationsPage({
       pushToast('error', 'Only admin-approved roles can delete operations. Please contact admin.')
       return
     }
-    if (!window.confirm('Are you sure you want to delete this operation? This will be recorded in history.')) return
+    const ok = await confirm(
+      'Delete this operation?',
+      'This action removes the operation record and cannot be undone.',
+    )
+    if (!ok) return
     try {
       await apiRequest(`/operations/${id}`, 'DELETE', token ?? undefined)
       pushToast('success', 'Operation deleted')
@@ -1953,6 +1957,7 @@ function OperationsPage({
 
   return (
     <section>
+      {modal}
       {viewMode === 'list' && (
         <>
           <div className="operations-overview">
@@ -2010,7 +2015,7 @@ function OperationsPage({
                         }
                       }}
                     >
-                      Status {sortBy === 'status' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                      Status {sortBy === 'status' ? (sortDir === 'asc' ? '^' : 'v') : ''}
                     </button>
                   </th>
                   <th>Source</th>
@@ -2028,14 +2033,14 @@ function OperationsPage({
                         }
                       }}
                     >
-                      Date {sortBy === 'date' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                      Date {sortBy === 'date' ? (sortDir === 'asc' ? '^' : 'v') : ''}
                     </button>
                   </th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading {statBaseLabel.toLowerCase()}…</td></tr>}
+                {loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading {statBaseLabel.toLowerCase()}...</td></tr>}
                 {!loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>No {statBaseLabel.toLowerCase()} yet. Click "+ New {singularOpLabel}" to create one.</td></tr>}
                 {sortedOperations.map((op) => (
                   <tr key={op.id}>
@@ -2043,8 +2048,8 @@ function OperationsPage({
                     <td>
                       <span className={`badge badge-${op.status.toLowerCase()}`}>{op.status}</span>
                     </td>
-                    <td>{op.source_location_name ?? '—'}</td>
-                    <td>{op.destination_location_name ?? '—'}</td>
+                    <td>{op.source_location_name ?? '-'}</td>
+                    <td>{op.destination_location_name ?? '-'}</td>
                     <td>{formatDate(op.created_at)}</td>
                     <td>
                       <div className="operation-row-actions">
@@ -2084,10 +2089,10 @@ function OperationsPage({
           <div className="control-bar">
             <div className="control-bar-left">
               <button className="btn btn-secondary" type="button" disabled={saving} onClick={() => { void submit('draft') }}>
-                {saving ? 'Saving…' : 'Save Draft'}
+                {saving ? 'Saving...' : 'Save Draft'}
               </button>
               <button className="btn btn-success" type="button" disabled={saving || overRequested} onClick={() => { void submit('validate') }}>
-                {saving ? 'Validating…' : 'Validate'}
+                {saving ? 'Validating...' : 'Validate'}
               </button>
               <button type="button" className="btn btn-secondary" onClick={() => {
                 resetDraftForm()
@@ -2114,7 +2119,7 @@ function OperationsPage({
                   <div className="field-group">
                     <label className="field-label">Source Location</label>
                     <select className="form-select" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)} required>
-                      <option value="">Select source location…</option>
+                      <option value="">Select source location...</option>
                       {locations.map((item) => (
                         <option key={item.id} value={item.name}>{item.name}</option>
                       ))}
@@ -2125,7 +2130,7 @@ function OperationsPage({
                   <div className="field-group">
                     <label className="field-label">Destination Location</label>
                     <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
-                      <option value="">Select destination location…</option>
+                      <option value="">Select destination location...</option>
                       {locations.map((item) => (
                         <option key={item.id} value={item.name}>{item.name}</option>
                       ))}
@@ -2136,7 +2141,7 @@ function OperationsPage({
                   <div className="field-group">
                     <label className="field-label">Inventory Location</label>
                     <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} required>
-                      <option value="">Select location…</option>
+                      <option value="">Select location...</option>
                       {locations.map((item) => (
                         <option key={item.id} value={item.name}>{item.name}</option>
                       ))}
@@ -2165,7 +2170,7 @@ function OperationsPage({
                         <tr key={index}>
                           <td>
                             <select className="form-select" value={line.product_id} onChange={(e) => updateLine(index, { product_id: e.target.value })} required>
-                              <option value="">Select a product…</option>
+                              <option value="">Select a product...</option>
                               {products.map((p) => (
                                 <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
                               ))}
@@ -2185,7 +2190,7 @@ function OperationsPage({
                             </td>
                           )}
                           <td>
-                            <button type="button" className="btn-icon" onClick={() => removeLine(index)} title="Remove">✕</button>
+                            <button type="button" className="btn-icon" onClick={() => removeLine(index)} title="Remove">x</button>
                           </td>
                         </tr>
                       ))}
@@ -2467,6 +2472,7 @@ function WarehousesPage({
   pushToast: (kind: Toast['kind'], text: string) => void
   currentUser: UserProfile | null
 }) {
+  const { modal, confirm } = useConfirm()
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [name, setName] = useState('')
   const [type, setType] = useState('Internal')
@@ -2503,7 +2509,11 @@ function WarehousesPage({
       pushToast('error', 'Only admin-approved roles can change locations. Please contact admin.')
       return
     }
-    if (!window.confirm('Are you sure you want to delete this warehouse? This will be recorded in history.')) return
+    const ok = await confirm(
+      'Delete this location?',
+      'Only empty locations can be deleted. This action cannot be undone.',
+    )
+    if (!ok) return
     try {
       await apiRequest(`/locations/${id}`, 'DELETE', token ?? undefined)
       pushToast('success', 'Warehouse deleted')
@@ -2622,6 +2632,7 @@ function WarehousesPage({
 
   return (
     <section className="warehouses-page">
+      {modal}
       <div className="operations-overview">
         <div className="operations-overview-top">
           <div className="product-title-block">
@@ -2694,7 +2705,7 @@ function WarehousesPage({
                 </tr>
               </thead>
               <tbody>
-                {loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={4}>Loading…</td></tr>}
+                {loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={4}>Loading...</td></tr>}
                 {!loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={4}>No locations configured yet.</td></tr>}
                 {warehouses.map((wh) => (
                   <Fragment key={wh.id}>
@@ -2716,7 +2727,7 @@ function WarehousesPage({
                             onClick={() => { void exportWarehouseInventoryCsv(wh) }}
                             disabled={inventoryLoadingId === wh.id}
                           >
-                            {inventoryLoadingId === wh.id ? 'Preparing…' : 'Export CSV'}
+                            {inventoryLoadingId === wh.id ? 'Preparing...' : 'Export CSV'}
                           </button>
                         </div>
                       </td>
@@ -2734,7 +2745,7 @@ function WarehousesPage({
                       <tr>
                         <td colSpan={4}>
                           {inventoryLoadingId === wh.id ? (
-                            <p className="muted">Loading stock details…</p>
+                            <p className="muted">Loading stock details...</p>
                           ) : (locationInventory[wh.id] || []).length === 0 ? (
                             <p className="muted">No products currently stocked in this location.</p>
                           ) : (
@@ -2782,6 +2793,7 @@ function ProfilePage({
   token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
 }) {
+  const { modal, confirm } = useConfirm()
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [roleRequestStatus, setRoleRequestStatus] = useState<UserRoleRequestStatus | null>(null)
@@ -2879,7 +2891,10 @@ function ProfilePage({
       return
     }
 
-    const ok = window.confirm(`Revoke ${user.name}'s role (${user.role}) to Warehouse Staff?`)
+    const ok = await confirm(
+      'Revoke user role?',
+      `${user.name} will be changed from ${user.role} to Warehouse Staff.`,
+    )
     if (!ok) return
 
     setRevokeBusyId(user.id)
@@ -2900,7 +2915,10 @@ function ProfilePage({
       return
     }
 
-    const ok = window.confirm(`Upgrade ${user.name} to Manager?`)
+    const ok = await confirm(
+      'Upgrade user role?',
+      `${user.name} will be upgraded to Manager.`,
+    )
     if (!ok) return
 
     setUpgradeBusyId(user.id)
@@ -2943,7 +2961,10 @@ function ProfilePage({
       pushToast('error', 'You cannot delete your own account.')
       return
     }
-    const ok = window.confirm(`Permanently delete ${user.name} (${user.email})? This cannot be undone.`)
+    const ok = await confirm(
+      'Delete user account?',
+      `${user.name} (${user.email}) will be permanently removed. This cannot be undone.`,
+    )
     if (!ok) return
     setDeleteBusyId(user.id)
     try {
@@ -3036,6 +3057,7 @@ function ProfilePage({
 
   return (
     <section className="profile-page">
+      {modal}
       <div className="profile-hero">
         <div className="product-title-block">
           <h2>My Profile</h2>
@@ -3048,7 +3070,7 @@ function ProfilePage({
           <div className="panel-card-header">Account Details</div>
           <div className="panel-card-body">
             <SyncStatusChip show={profileRefreshing} />
-            {loading && !profile && <p className="muted">Loading profile…</p>}
+            {loading && !profile && <p className="muted">Loading profile...</p>}
             {!loading && !profile && <p className="muted">Unable to load profile. Please try again.</p>}
             {profile && (
               <div className="info-grid">
@@ -3078,7 +3100,7 @@ function ProfilePage({
             <div className="panel-card-header">Role Request Status</div>
             <div className="panel-card-body">
               <SyncStatusChip show={roleStatusRefreshing} />
-              {loading && !roleRequestStatus && <p className="muted">Loading role request status…</p>}
+              {loading && !roleRequestStatus && <p className="muted">Loading role request status...</p>}
               {!loading && !roleRequestStatus && <p className="muted">Unable to load role request status.</p>}
               {roleRequestStatus && roleRequestStatus.status === 'not_requested' && (
                 <p className="muted">No elevated-role request has been submitted yet.</p>
@@ -3093,19 +3115,19 @@ function ProfilePage({
                   </dl>
                   <dl className="info-item">
                     <dt>Requested Role</dt>
-                    <dd>{roleRequestStatus.requested_role || '—'}</dd>
+                    <dd>{roleRequestStatus.requested_role || '-'}</dd>
                   </dl>
                   <dl className="info-item">
                     <dt>Requested At</dt>
-                    <dd>{roleRequestStatus.requested_at ? formatDate(roleRequestStatus.requested_at) : '—'}</dd>
+                    <dd>{roleRequestStatus.requested_at ? formatDate(roleRequestStatus.requested_at) : '-'}</dd>
                   </dl>
                   <dl className="info-item">
                     <dt>Reviewed At</dt>
-                    <dd>{roleRequestStatus.reviewed_at ? formatDate(roleRequestStatus.reviewed_at) : '—'}</dd>
+                    <dd>{roleRequestStatus.reviewed_at ? formatDate(roleRequestStatus.reviewed_at) : '-'}</dd>
                   </dl>
                   <dl className="info-item">
                     <dt>Review Note</dt>
-                    <dd>{roleRequestStatus.review_note || '—'}</dd>
+                    <dd>{roleRequestStatus.review_note || '-'}</dd>
                   </dl>
                 </div>
               )}
@@ -3117,7 +3139,7 @@ function ProfilePage({
                     onClick={() => { void requestManagerRole() }}
                     disabled={requestSubmitBusy}
                   >
-                    {requestSubmitBusy ? 'Submitting…' : 'Apply for Manager Role'}
+                    {requestSubmitBusy ? 'Submitting...' : 'Apply for Manager Role'}
                   </button>
                 </div>
               )}
@@ -3149,7 +3171,7 @@ function ProfilePage({
                   </tr>
                 </thead>
                 <tbody>
-                  {roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading requests…</td></tr>}
+                  {roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading requests...</td></tr>}
                   {!roleRequestsLoading && actionableRoleRequests.length === 0 && <tr className="empty-row"><td colSpan={6}>No pending approvals right now.</td></tr>}
                   {actionableRoleRequests.map((request) => (
                     <tr key={request.id}>
@@ -3210,7 +3232,7 @@ function ProfilePage({
                   </tr>
                 </thead>
                 <tbody>
-                  {managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading users…</td></tr>}
+                  {managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading users...</td></tr>}
                   {!managedUsersLoading && managedUsers.length === 0 && <tr className="empty-row"><td colSpan={6}>No users found.</td></tr>}
                   {managedUsers.map((user) => (
                     <tr key={user.id}>
@@ -3223,7 +3245,7 @@ function ProfilePage({
                       </td>
                       <td>
                         {String(user.role).toLowerCase() !== 'warehouse staff' ? (
-                          <span className="muted">—</span>
+                          <span className="muted">-</span>
                         ) : (
                           <button
                             type="button"
@@ -3231,13 +3253,13 @@ function ProfilePage({
                             onClick={() => { void upgradeUserRole(user) }}
                             disabled={upgradeBusyId === user.id || revokeBusyId === user.id || deleteBusyId === user.id}
                           >
-                            {upgradeBusyId === user.id ? 'Upgrading…' : 'Upgrade to Manager'}
+                            {upgradeBusyId === user.id ? 'Upgrading...' : 'Upgrade to Manager'}
                           </button>
                         )}
                       </td>
                       <td>
                         {user.id === profile?.id || String(user.role).toLowerCase() === 'warehouse staff' ? (
-                          <span className="muted">—</span>
+                          <span className="muted">-</span>
                         ) : (
                           <button
                             type="button"
@@ -3245,7 +3267,7 @@ function ProfilePage({
                             onClick={() => { void revokeUserRole(user) }}
                             disabled={revokeBusyId === user.id || upgradeBusyId === user.id || deleteBusyId === user.id}
                           >
-                            {revokeBusyId === user.id ? 'Revoking…' : 'Revoke Role'}
+                            {revokeBusyId === user.id ? 'Revoking...' : 'Revoke Role'}
                           </button>
                         )}
                       </td>
@@ -3259,7 +3281,7 @@ function ProfilePage({
                             onClick={() => { void deleteUser(user) }}
                             disabled={deleteBusyId === user.id || revokeBusyId === user.id || upgradeBusyId === user.id}
                           >
-                            {deleteBusyId === user.id ? 'Deleting…' : 'Delete'}
+                            {deleteBusyId === user.id ? 'Deleting...' : 'Delete'}
                           </button>
                         )}
                       </td>
@@ -3291,7 +3313,7 @@ function ProfilePage({
                   </tr>
                 </thead>
                 <tbody>
-                  {auditLogLoading && auditLog.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading audit log…</td></tr>}
+                  {auditLogLoading && auditLog.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading audit log...</td></tr>}
                   {!auditLogLoading && auditLog.length === 0 && <tr className="empty-row"><td colSpan={6}>No role actions recorded yet.</td></tr>}
                   {auditLog.map((entry) => (
                     <tr key={entry.id}>
@@ -3310,16 +3332,16 @@ function ProfilePage({
                                     : 'Revoked'}
                         </span>
                       </td>
-                      <td>{entry.target_user_email ?? '—'}</td>
+                      <td>{entry.target_user_email ?? '-'}</td>
                       <td>
                         {entry.action === 'USER_DELETED'
-                          ? <span>{entry.old_role || 'User'} → Deleted</span>
+                          ? <span>{entry.old_role || 'User'} {'->'} Deleted</span>
                           : entry.old_role && entry.new_role
-                          ? <span>{entry.old_role} → {entry.new_role}</span>
-                          : entry.new_role ?? '—'}
+                          ? <span>{entry.old_role} {'->'} {entry.new_role}</span>
+                          : entry.new_role ?? '-'}
                       </td>
-                      <td>{entry.performed_by_email ?? '—'}</td>
-                      <td className="muted">{entry.note ?? '—'}</td>
+                      <td>{entry.performed_by_email ?? '-'}</td>
+                      <td className="muted">{entry.note ?? '-'}</td>
                       <td className="muted">{new Date(entry.created_at).toLocaleString()}</td>
                     </tr>
                   ))}
@@ -3334,3 +3356,4 @@ function ProfilePage({
 }
 
 export default App
+

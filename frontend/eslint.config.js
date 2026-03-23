@@ -1,3 +1,8 @@
+/**
+ * ESLint flat configuration for the frontend.
+ * Applies TypeScript and React linting rules for source files.
+ */
+
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

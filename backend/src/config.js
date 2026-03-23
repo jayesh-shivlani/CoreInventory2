@@ -1,3 +1,8 @@
+/**
+ * Runtime configuration loader and validator.
+ * Centralizes environment parsing and startup safety checks.
+ */
+
 const path = require('path')
 const dotenv = require('dotenv')
 
@@ -12,7 +17,7 @@ const EMAIL_TIMEOUT_MS = Number(process.env.EMAIL_TIMEOUT_MS || 15000)
 const STRICT_EMAIL_DOMAIN_CHECK = String(process.env.STRICT_EMAIL_DOMAIN_CHECK || 'false').toLowerCase() === 'true'
 const EXPOSE_DEV_OTP =
   process.env.NODE_ENV !== 'production' &&
-  String(process.env.EXPOSE_DEV_OTP || 'true').toLowerCase() === 'true'
+  String(process.env.EXPOSE_DEV_OTP || 'false').toLowerCase() === 'true'
 
 const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || '')
   .split(',')
@@ -29,8 +34,11 @@ function isLocalDevOrigin(origin) {
 }
 
 function isCorsOriginAllowed(origin) {
+  // In local development, allow localhost callers when an explicit allow-list is not set.
   const isDevLocalOrigin = process.env.NODE_ENV !== 'production' && origin && isLocalDevOrigin(origin)
-  return !origin || configuredOrigins.length === 0 || configuredOrigins.includes(origin) || isDevLocalOrigin
+  if (!origin) return true
+  if (configuredOrigins.length > 0) return configuredOrigins.includes(origin)
+  return Boolean(isDevLocalOrigin)
 }
 
 function validateRuntimeConfig() {
@@ -56,10 +64,19 @@ function validateRuntimeConfig() {
     issues.push('EMAIL_TIMEOUT_MS must be a positive number')
   }
 
+  const jwtSecret = String(process.env.JWT_SECRET || '').trim()
+  if (!jwtSecret) {
+    issues.push('JWT_SECRET is required')
+  }
+
   if (process.env.NODE_ENV === 'production') {
-    const jwtSecret = String(process.env.JWT_SECRET || '').trim()
-    if (!jwtSecret || jwtSecret === 'change-me-in-production') {
-      issues.push('JWT_SECRET must be set to a strong non-default value in production')
+    // Production requires stricter defaults so weak local/dev settings cannot leak into deployment.
+    if (jwtSecret === 'change-me-in-production' || jwtSecret.length < 32) {
+      issues.push('JWT_SECRET must be at least 32 characters and not a placeholder in production')
+    }
+
+    if (!String(process.env.ADMIN_PASSWORD || '').trim()) {
+      issues.push('ADMIN_PASSWORD must be explicitly set in production')
     }
 
     if (EXPOSE_DEV_OTP) {

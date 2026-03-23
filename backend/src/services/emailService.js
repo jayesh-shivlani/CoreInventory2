@@ -1,3 +1,8 @@
+/**
+ * Email delivery service.
+ * Handles OTP and role-notification email transport and fallback behavior.
+ */
+
 const { EMAIL_TIMEOUT_MS, EXPOSE_DEV_OTP } = require('../config')
 const { withTimeout } = require('../utils/withTimeout')
 
@@ -183,7 +188,7 @@ async function sendRoleUpdatedEmail(toEmail, recipientName, oldRole, newRole, ad
   const delivery = await sendBrevoEmail(
     normalizedEmail,
     'Your account role has been updated',
-    `<p>Hi ${safeName},</p><p>Your account role was updated by an admin.</p><p><strong>Role change:</strong> ${fromRole} → ${toRole}</p><p><strong>Details:</strong> ${note}</p>${linkHtml}<p>Thanks,<br/>Core Inventory Team</p>`,
+    `<p>Hi ${safeName},</p><p>Your account role was updated by an admin.</p><p><strong>Role change:</strong> ${fromRole} -> ${toRole}</p><p><strong>Details:</strong> ${note}</p>${linkHtml}<p>Thanks,<br/>Core Inventory Team</p>`,
   )
 
   if (delivery && delivery.delivered) {
