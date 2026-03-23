@@ -52,11 +52,13 @@ interface KpiCardProps {
   value:    number
   variant?: 'warning' | 'success'
   icon?:    string
+  onClick?: () => void
 }
 
-export default function KpiCard({ label, value, variant, icon }: KpiCardProps) {
+export default function KpiCard({ label, value, variant, icon, onClick }: KpiCardProps) {
   const className = [
     'kpi-card',
+    onClick ? 'kpi-card-clickable' : '',
     variant === 'warning' ? 'kpi-warning' : '',
     variant === 'success' ? 'kpi-success' : '',
   ]
@@ -64,7 +66,18 @@ export default function KpiCard({ label, value, variant, icon }: KpiCardProps) {
     .join(' ')
 
   return (
-    <article className={className}>
+    <article
+      className={className}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onClick()
+        }
+      } : undefined}
+    >
       <div className="kpi-card-top">
         {icon && KPI_ICONS[icon] && (
           <span className="kpi-icon">{KPI_ICONS[icon]}</span>

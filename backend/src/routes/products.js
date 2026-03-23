@@ -219,14 +219,18 @@ router.delete('/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) 
       'SELECT COUNT(*)::INT AS count FROM Operation_Lines WHERE product_id = ?', productId,
     )
     if (Number(lineCount?.count || 0) > 0) {
-      return res.status(400).json({ message: 'Cannot delete a product that is used in operations' })
+      return res.status(409).json({
+        message: 'This product is part of operation history and cannot be deleted. Keep it for traceability, or update its details instead.',
+      })
     }
 
     const ledgerCount = await db.get(
       'SELECT COUNT(*)::INT AS count FROM Stock_Ledger WHERE product_id = ?', productId,
     )
     if (Number(ledgerCount?.count || 0) > 0) {
-      return res.status(400).json({ message: 'Cannot delete a product with stock movement history' })
+      return res.status(409).json({
+        message: 'This product has stock movement history and cannot be deleted. Keep it for audit integrity, or update it instead.',
+      })
     }
 
     await db.transaction(async (tx) => {

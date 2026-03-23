@@ -3,7 +3,8 @@
  * Displays stock ledger events with filtering and CSV export support.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest, formatDate, safeNumber } from '../utils/helpers'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { API_BASE, LIVE_SYNC_INTERVAL_MS } from '../config/constants'
@@ -45,6 +46,8 @@ const TYPE_BADGE: Record<string, string> = {
 }
 
 export default function MoveHistoryPage({ token, pushToast }: Props) {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [entries, setEntries] = useState<LedgerEntry[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -52,6 +55,21 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const [sortBy, setSortBy] = useState<'date' | 'product' | 'type' | 'from' | 'to' | 'quantity' | 'reference'>('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const nextSearch = params.get('search') ?? ''
+    const nextDateFrom = params.get('dateFrom') ?? ''
+    const nextDateTo = params.get('dateTo') ?? ''
+    const nextType = params.get('type') ?? ''
+
+    setSearch((prev) => (prev === nextSearch ? prev : nextSearch))
+    setDateFrom((prev) => (prev === nextDateFrom ? prev : nextDateFrom))
+    setDateTo((prev) => (prev === nextDateTo ? prev : nextDateTo))
+    setTypeFilter((prev) => (prev === nextType ? prev : nextType))
+  }, [location.search])
 
   const activeFilters = [search.trim(), dateFrom, dateTo, typeFilter].filter(Boolean).length
 
@@ -64,25 +82,75 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
     return p.toString() ? `?${p.toString()}` : ''
   }, [search, dateFrom, dateTo, typeFilter])
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const hasLoadedLedgerRef = useRef(false)
+
+  const load = useCallback(async (showLoader = false) => {
+    if (showLoader || !hasLoadedLedgerRef.current) {
+      setLoading(true)
+    }
     try {
       const data = await apiRequest<LedgerEntry[]>(`/ledger${buildQuery()}`, 'GET', token ?? undefined)
       setEntries(Array.isArray(data) ? data : [])
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
-      setLoading(false)
+      if (showLoader || !hasLoadedLedgerRef.current) {
+        setLoading(false)
+        hasLoadedLedgerRef.current = true
+      }
     }
   }, [buildQuery, token, pushToast])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(true) }, [load])
   useEffect(() => {
-    const t = setInterval(load, LIVE_SYNC_INTERVAL_MS)
+    const t = setInterval(() => { void load(false) }, LIVE_SYNC_INTERVAL_MS)
     return () => clearInterval(t)
   }, [load])
 
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (search.trim()) params.set('search', search.trim())
+    if (dateFrom) params.set('dateFrom', dateFrom)
+    if (dateTo) params.set('dateTo', dateTo)
+    if (typeFilter) params.set('type', typeFilter)
+
+    const next = params.toString()
+    const current = location.search.startsWith('?') ? location.search.slice(1) : location.search
+    if (next !== current) {
+      navigate({ pathname: location.pathname, search: next ? `?${next}` : '' }, { replace: true })
+    }
+  }, [search, dateFrom, dateTo, typeFilter, location.pathname, location.search, navigate])
+
   const movedQty = useMemo(() => entries.reduce((s, e) => s + safeNumber(e.quantity), 0), [entries])
+
+  const sortedEntries = useMemo(() => {
+    const copy = [...entries]
+    copy.sort((a, b) => {
+      let cmp = 0
+      if (sortBy === 'date') cmp = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      else if (sortBy === 'product') cmp = String(a.product_name || '').localeCompare(String(b.product_name || ''))
+      else if (sortBy === 'type') cmp = String(a.operation_type || '').localeCompare(String(b.operation_type || ''))
+      else if (sortBy === 'from') cmp = String(a.from_location_name || '').localeCompare(String(b.from_location_name || ''))
+      else if (sortBy === 'to') cmp = String(a.to_location_name || '').localeCompare(String(b.to_location_name || ''))
+      else if (sortBy === 'quantity') cmp = safeNumber(a.quantity) - safeNumber(b.quantity)
+      else if (sortBy === 'reference') cmp = String(a.reference_number || '').localeCompare(String(b.reference_number || ''))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [entries, sortBy, sortDir])
+
+  const toggleSort = (key: 'date' | 'product' | 'type' | 'from' | 'to' | 'quantity' | 'reference') => {
+    if (sortBy === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortBy(key)
+    setSortDir(key === 'date' ? 'desc' : 'asc')
+  }
+
+  const sortMark = (key: 'date' | 'product' | 'type' | 'from' | 'to' | 'quantity' | 'reference') => (
+    sortBy === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  )
 
   return (
     <section className="move-history-page">
@@ -163,13 +231,13 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Date &amp; Time</th>
-                <th>Product</th>
-                <th>Type</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Quantity</th>
-                <th>Reference</th>
+                <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('date')}>Date &amp; Time{sortMark('date')}</button></th>
+                <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('product')}>Product{sortMark('product')}</button></th>
+                <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('type')}>Type{sortMark('type')}</button></th>
+                <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('from')}>From{sortMark('from')}</button></th>
+                <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('to')}>To{sortMark('to')}</button></th>
+                <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('quantity')}>Quantity{sortMark('quantity')}</button></th>
+                <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('reference')}>Reference{sortMark('reference')}</button></th>
                 <th>Notes</th>
               </tr>
             </thead>
@@ -182,7 +250,7 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
                   </td>
                 </tr>
               )}
-              {entries.map((e) => (
+              {sortedEntries.map((e) => (
                 <tr key={e.id}>
                   <td style={{ whiteSpace: 'nowrap' }}>{formatDate(e.timestamp)}</td>
                   <td><strong>{e.product_name}</strong></td>

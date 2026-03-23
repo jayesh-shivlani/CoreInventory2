@@ -287,15 +287,17 @@ router.get('/users/role-request-status', requireAuth, async (req, res) => {
     }
 
     const normalized = String(latest.status || '').trim().toUpperCase()
-    const status = isPendingRoleRequestStatus(normalized)
-      ? 'pending'
-      : normalized === 'APPROVED'
-        ? 'completed'
-        : normalized === 'REVOKED'
-          ? 'revoked'
-          : normalized === 'REJECTED'
-            ? 'rejected'
-            : 'pending'
+    const status = normalized === 'OTP_PENDING'
+      ? 'not_requested'
+      : isPendingRoleRequestStatus(normalized)
+        ? 'pending'
+        : normalized === 'APPROVED'
+          ? 'completed'
+          : normalized === 'REVOKED'
+            ? 'revoked'
+            : normalized === 'REJECTED'
+              ? 'rejected'
+              : 'not_requested'
 
     return res.json({
       status,

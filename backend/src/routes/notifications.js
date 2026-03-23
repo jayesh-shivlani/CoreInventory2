@@ -105,17 +105,48 @@ router.get('/', requireAuth, async (req, res) => {
       }
     }
 
-    // Elevated: operations pending action
+    // Elevated: operations pending action (direct links to each operation)
     if (isElevated) {
-      const pendingOps = await db.get(
+      const pendingRows = await db.all(
+        `SELECT id, reference_number, type, status, created_at
+           FROM Operations
+          WHERE status IN ('Waiting', 'Ready')
+          ORDER BY created_at ASC
+          LIMIT 8`,
+      )
+
+      const routeByType = {
+        Receipt: '/operations/receipts',
+        Delivery: '/operations/deliveries',
+        Internal: '/operations/transfers',
+        Adjustment: '/operations/adjustments',
+      }
+
+      for (const op of pendingRows) {
+        const opType = String(op.type || 'Receipt')
+        const baseRoute = routeByType[opType] || '/operations/receipts'
+        const opId = Number(op.id)
+        const ref = String(op.reference_number || `#${opId}`)
+        const status = String(op.status || 'Waiting')
+        notifications.push({
+          id: `pending-op-${opId}`,
+          kind: status === 'Ready' ? 'warning' : 'info',
+          title: `${opType} pending: ${ref}`,
+          message: `Status is ${status}. Click View to open this exact operation.`,
+          link: `${baseRoute}?focusOp=${opId}`,
+        })
+      }
+
+      const pendingCount = await db.get(
         "SELECT COUNT(*) AS count FROM Operations WHERE status IN ('Waiting', 'Ready')",
       )
-      const opCount = Number(pendingOps?.count || 0)
-      if (opCount > 0) {
+      const totalPending = Number(pendingCount?.count || 0)
+      if (totalPending > pendingRows.length) {
         notifications.push({
-          id: 'pending-ops', kind: 'info',
-          title: `${opCount} operation${opCount > 1 ? 's' : ''} pending`,
-          message: `${opCount} operation${opCount > 1 ? 's are' : ' is'} waiting to be processed.`,
+          id: 'pending-ops-more',
+          kind: 'info',
+          title: `${totalPending} operations pending`,
+          message: `${pendingRows.length} shown here. Open Operations to view all pending records.`,
           link: '/operations/receipts',
         })
       }

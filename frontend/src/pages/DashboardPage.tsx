@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiRequest, safeNumber } from '../utils/helpers'
 import KpiCard from '../components/KpiCard'
 import SyncStatusChip from '../components/SyncStatusChip'
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export default function DashboardPage({ token, pushToast }: Props) {
+  const navigate = useNavigate()
   const [loading, setLoading]   = useState(true)
   const [kpis, setKpis]         = useState<KPIResponse>({
     totalProductsInStock:       0,
@@ -61,8 +63,8 @@ export default function DashboardPage({ token, pushToast }: Props) {
       } catch { /* keep defaults */ }
     }
 
-    const load = async () => {
-      setLoading(true)
+    const load = async (showLoader = false) => {
+      if (showLoader) setLoading(true)
       try {
         const [raw, lowStockRows] = await Promise.all([
           apiRequest<Partial<KPIResponse> | null>(`/dashboard/kpis${query}`, 'GET', token ?? undefined),
@@ -90,13 +92,13 @@ export default function DashboardPage({ token, pushToast }: Props) {
       } catch (err) {
         pushToast('error', `Dashboard load failed: ${(err as Error).message}`)
       } finally {
-        if (active) setLoading(false)
+        if (active && showLoader) setLoading(false)
       }
     }
 
     void loadFilters()
-    void load()
-    const timer = setInterval(() => { void load(); void loadFilters() }, LIVE_SYNC_INTERVAL_MS)
+    void load(true)
+    const timer = setInterval(() => { void load(false); void loadFilters() }, LIVE_SYNC_INTERVAL_MS)
     return () => { active = false; clearInterval(timer) }
   }, [query, token, pushToast])
 
@@ -153,11 +155,38 @@ export default function DashboardPage({ token, pushToast }: Props) {
           <SyncStatusChip show={loading} />
         </div>
         <div className="kpi-grid">
-          <KpiCard label="Total Products in Stock"   value={kpis.totalProductsInStock}       icon="box"      />
-          <KpiCard label="Low / Out of Stock"        value={kpis.lowOrOutOfStockItems}        icon="alert"    variant="warning" />
-          <KpiCard label="Pending Receipts"          value={kpis.pendingReceipts}             icon="receipt"  />
-          <KpiCard label="Pending Deliveries"        value={kpis.pendingDeliveries}           icon="truck"    />
-          <KpiCard label="Transfers Scheduled"       value={kpis.scheduledInternalTransfers} icon="transfer" variant="success" />
+          <KpiCard
+            label="Total Products in Stock"
+            value={kpis.totalProductsInStock}
+            icon="box"
+            onClick={() => navigate('/products')}
+          />
+          <KpiCard
+            label="Low / Out of Stock"
+            value={kpis.lowOrOutOfStockItems}
+            icon="alert"
+            variant="warning"
+            onClick={() => navigate('/products?lowStockOnly=true')}
+          />
+          <KpiCard
+            label="Pending Receipts"
+            value={kpis.pendingReceipts}
+            icon="receipt"
+            onClick={() => navigate('/operations/receipts?status=Waiting')}
+          />
+          <KpiCard
+            label="Pending Deliveries"
+            value={kpis.pendingDeliveries}
+            icon="truck"
+            onClick={() => navigate('/operations/deliveries?status=Waiting')}
+          />
+          <KpiCard
+            label="Transfers Scheduled"
+            value={kpis.scheduledInternalTransfers}
+            icon="transfer"
+            variant="success"
+            onClick={() => navigate('/operations/transfers?status=Ready')}
+          />
         </div>
       </div>
 
@@ -166,7 +195,12 @@ export default function DashboardPage({ token, pushToast }: Props) {
         <div className="dashboard-header-card low-stock-alert-card">
           <div className="list-header dashboard-section-header">
             <h2>Low Stock Alerts</h2>
-            <span className="alert-count-pill">{lowStockProducts.length} product(s)</span>
+            <div className="list-header-meta" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span className="alert-count-pill">{lowStockProducts.length} product(s)</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/products?lowStockOnly=true')}>
+                View all
+              </button>
+            </div>
           </div>
           <div className="low-stock-alert-list">
             {lowStockProducts.slice(0, 6).map((p) => (

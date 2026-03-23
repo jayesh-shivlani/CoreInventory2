@@ -3,8 +3,8 @@
  * Manages receipt, delivery, transfer, and adjustment operation workflows.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useConfirm } from '../hooks/useConfirm'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { hasElevatedAccess } from '../utils/authHelpers'
@@ -20,6 +20,7 @@ type Props = {
 
 export default function OperationsPage({ token, pushToast, currentUser }: Props) {
   const location = useLocation()
+  const navigate = useNavigate()
   const { modal, confirm } = useConfirm()
   const operationType = toOperationKind(location.pathname)
   const canDelete = hasElevatedAccess(currentUser)
@@ -30,6 +31,11 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   const [locations, setLocations] = useState<Warehouse[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [focusedOperationId, setFocusedOperationId] = useState<number | null>(null)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [sortBy, setSortBy] = useState<'reference' | 'status' | 'source' | 'destination' | 'date'>('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [supplier, setSupplier] = useState('')
   const [sourceLocation, setSourceLocation] = useState('')
   const [destinationLocation, setDestinationLocation] = useState('')
@@ -37,8 +43,26 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     { product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' },
   ])
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const focusOperationId = useMemo(() => {
+    const raw = new URLSearchParams(location.search).get('focusOp')
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }, [location.search])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const nextSearch = params.get('search') ?? ''
+    const nextStatus = params.get('status') ?? ''
+    setSearch((prev) => (prev === nextSearch ? prev : nextSearch))
+    setStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus))
+  }, [location.search])
+
+  const hasLoadedOperationsRef = useRef(false)
+
+  const load = useCallback(async (showLoader = false) => {
+    if (showLoader || !hasLoadedOperationsRef.current) {
+      setLoading(true)
+    }
     try {
       const [ops, prods, locs] = await Promise.all([
         apiRequest<Operation[]>(`/operations?type=${operationType}`, 'GET', token ?? undefined),
@@ -51,17 +75,40 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
-      setLoading(false)
+      if (showLoader || !hasLoadedOperationsRef.current) {
+        setLoading(false)
+        hasLoadedOperationsRef.current = true
+      }
     }
   }, [operationType, token, pushToast])
 
   useEffect(() => {
-    void load()
+    void load(true)
     const timer = setInterval(() => {
-      void load()
+      void load(false)
     }, LIVE_SYNC_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [load])
+
+  useEffect(() => {
+    if (!focusOperationId) return
+    if (viewMode !== 'list') {
+      setViewMode('list')
+      return
+    }
+    if (!operations.some((op) => op.id === focusOperationId)) return
+
+    setFocusedOperationId(focusOperationId)
+    const rafId = window.requestAnimationFrame(() => {
+      const row = document.getElementById(`operation-row-${focusOperationId}`)
+      row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    const timer = window.setTimeout(() => setFocusedOperationId(null), 2600)
+    return () => {
+      window.cancelAnimationFrame(rafId)
+      window.clearTimeout(timer)
+    }
+  }, [focusOperationId, operations, viewMode])
 
   const resetDraft = () => {
     setSupplier('')
@@ -162,7 +209,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
 
       resetDraft()
       setViewMode('list')
-      await load()
+      await load(false)
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
@@ -174,7 +221,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     try {
       await apiRequest(`/operations/${id}/validate`, 'POST', token ?? undefined)
       pushToast('success', 'Operation validated')
-      await load()
+      await load(false)
     } catch (err) {
       pushToast('error', (err as Error).message)
     }
@@ -184,7 +231,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     try {
       await apiRequest(`/operations/${id}/status`, 'POST', token ?? undefined, { status: nextStatus })
       pushToast('success', `Status changed to ${nextStatus}`)
-      await load()
+      await load(false)
     } catch (err) {
       pushToast('error', (err as Error).message)
     }
@@ -214,6 +261,73 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     return []
   }
 
+  const filteredOperations = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return operations.filter((op) => {
+      const statusOk = !statusFilter || op.status === statusFilter
+      if (!statusOk) return false
+      if (!query) return true
+      const hay = [
+        op.reference_number,
+        op.source_location_name ?? '',
+        op.destination_location_name ?? '',
+        op.status,
+      ].join(' ').toLowerCase()
+      return hay.includes(query)
+    })
+  }, [operations, search, statusFilter])
+
+  const sortedOperations = useMemo(() => {
+    const rank: Record<Operation['status'], number> = {
+      Draft: 1,
+      Waiting: 2,
+      Ready: 3,
+      Done: 4,
+      Canceled: 5,
+    }
+
+    const copy = [...filteredOperations]
+    copy.sort((a, b) => {
+      let cmp = 0
+      if (sortBy === 'reference') cmp = a.reference_number.localeCompare(b.reference_number)
+      else if (sortBy === 'status') cmp = (rank[a.status] ?? 99) - (rank[b.status] ?? 99)
+      else if (sortBy === 'source') cmp = String(a.source_location_name || '').localeCompare(String(b.source_location_name || ''))
+      else if (sortBy === 'destination') cmp = String(a.destination_location_name || '').localeCompare(String(b.destination_location_name || ''))
+      else if (sortBy === 'date') cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [filteredOperations, sortBy, sortDir])
+
+  const toggleSort = (key: 'reference' | 'status' | 'source' | 'destination' | 'date') => {
+    if (sortBy === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortBy(key)
+    setSortDir(key === 'date' ? 'desc' : 'asc')
+  }
+
+  const sortMark = (key: 'reference' | 'status' | 'source' | 'destination' | 'date') => (
+    sortBy === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  )
+
+  const activeFilters = [search.trim(), statusFilter].filter(Boolean).length
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (search.trim()) params.set('search', search.trim())
+    else params.delete('search')
+    if (statusFilter) params.set('status', statusFilter)
+    else params.delete('status')
+
+    const next = params.toString()
+    const current = location.search.startsWith('?') ? location.search.slice(1) : location.search
+    if (next !== current) {
+      navigate({ pathname: location.pathname, search: next ? `?${next}` : '' }, { replace: true })
+    }
+  }, [search, statusFilter, location.pathname, location.search, navigate])
+
   return (
     <section>
       {modal}
@@ -228,23 +342,60 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
               </button>
             </div>
           </div>
+          <div className="ledger-filter-grid" style={{ marginBottom: 14 }}>
+            <div className="filter-group">
+              <label className="filter-label">Search</label>
+              <input
+                className="search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Reference or location"
+              />
+            </div>
+            <div className="filter-group">
+              <label className="filter-label">Status</label>
+              <select className="form-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="">All statuses</option>
+                <option value="Draft">Draft</option>
+                <option value="Waiting">Waiting</option>
+                <option value="Ready">Ready</option>
+                <option value="Done">Done</option>
+                <option value="Canceled">Canceled</option>
+              </select>
+            </div>
+            <div className="filter-group" style={{ justifyContent: 'flex-end' }}>
+              <label className="filter-label" style={{ visibility: 'hidden' }}>Reset</label>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setSearch(''); setStatusFilter('') }}
+                disabled={activeFilters === 0}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
           <div className="data-table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Reference</th>
-                  <th>Status</th>
-                  <th>Source</th>
-                  <th>Destination</th>
-                  <th>Date</th>
+                  <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('reference')}>Reference{sortMark('reference')}</button></th>
+                  <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('status')}>Status{sortMark('status')}</button></th>
+                  <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('source')}>Source{sortMark('source')}</button></th>
+                  <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('destination')}>Destination{sortMark('destination')}</button></th>
+                  <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('date')}>Date{sortMark('date')}</button></th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && operations.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading...</td></tr>}
-                {!loading && operations.length === 0 && <tr className="empty-row"><td colSpan={6}>No operations found</td></tr>}
-                {operations.map((op) => (
-                  <tr key={op.id}>
+                {loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>Loading...</td></tr>}
+                {!loading && sortedOperations.length === 0 && <tr className="empty-row"><td colSpan={6}>No operations match the current filters</td></tr>}
+                {sortedOperations.map((op) => (
+                  <tr
+                    key={op.id}
+                    id={`operation-row-${op.id}`}
+                    className={focusedOperationId === op.id ? 'row-focus' : undefined}
+                  >
                     <td><strong>{op.reference_number}</strong></td>
                     <td><span className={`badge badge-${op.status.toLowerCase()}`}>{op.status}</span></td>
                     <td>{op.source_location_name ?? '-'}</td>

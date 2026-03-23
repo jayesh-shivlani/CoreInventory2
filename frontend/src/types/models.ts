@@ -145,6 +145,7 @@ export type WarehouseInventoryRow = {
   sku: string
   unit_of_measure: string
   quantity: number
+  reorder_minimum?: number
 }
 
 export type AnalyticsOverview = {

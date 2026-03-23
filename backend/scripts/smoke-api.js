@@ -1,8 +1,52 @@
 /* eslint-disable no-console */
 
+const path = require('path')
+const dotenv = require('dotenv')
+
+// Load backend/.env for local runs where shell env vars are not exported.
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') })
+dotenv.config()
+
 const BASE_URL = (process.env.SMOKE_API_BASE_URL || 'http://localhost:4000/api').replace(/\/$/, '')
-const DEMO_EMAIL = process.env.SMOKE_DEMO_EMAIL || 'demo@coreinventory.app'
-const DEMO_PASSWORD = process.env.SMOKE_DEMO_PASSWORD || 'demo12345'
+const SMOKE_LOGIN_EMAIL =
+  process.env.SMOKE_DEMO_EMAIL ||
+  process.env.ADMIN_EMAIL ||
+  'admin@example.com'
+const SMOKE_LOGIN_PASSWORD =
+  process.env.SMOKE_DEMO_PASSWORD ||
+  process.env.ADMIN_PASSWORD ||
+  'Admin@12345'
+
+async function loadSignupOtpFromDb(email) {
+  const connectionString = String(process.env.DATABASE_URL || '').trim()
+  if (!connectionString) return null
+
+  let Pool
+  try {
+    ;({ Pool } = require('pg'))
+  } catch {
+    return null
+  }
+
+  const pool = new Pool({ connectionString })
+  try {
+    const result = await pool.query(
+      `SELECT otp_code
+         FROM Signup_Verifications
+        WHERE LOWER(email) = LOWER($1)
+          AND otp_expires_at > CURRENT_TIMESTAMP
+        ORDER BY id DESC
+        LIMIT 1`,
+      [email],
+    )
+    const otp = String(result.rows?.[0]?.otp_code || '').trim()
+    return otp || null
+  } catch {
+    return null
+  } finally {
+    await pool.end()
+  }
+}
 
 const results = []
 
@@ -47,6 +91,7 @@ async function run() {
   try {
     const signupEmail = `smoke+${Date.now()}@example.com`
     const signupPassword = 'smoke12345'
+    let token = null
 
     const signupRequest = await api('/auth/register', {
       method: 'POST',
@@ -64,7 +109,7 @@ async function run() {
     }
     record('Signup OTP request', true, `email=${signupEmail}`)
 
-    const signupOtp = signupRequest.payload?.dev_otp
+    const signupOtp = signupRequest.payload?.dev_otp || await loadSignupOtpFromDb(signupEmail)
     if (signupOtp) {
       await expectOk('Signup OTP verify', '/auth/register', {
         method: 'POST',
@@ -83,6 +128,7 @@ async function run() {
 
       record('Signup OTP verify', true, 'Account created')
       record('Signup OTP login', Boolean(signupLogin?.token), 'Token issued for new user')
+      token = signupLogin?.token || null
     } else {
       record('Signup OTP verify', true, 'Skipped: OTP delivered via email provider')
     }
@@ -90,16 +136,20 @@ async function run() {
     const health = await expectOk('Health', '/health')
     record('Health', true, `status=${health?.status || 'ok'}`)
 
-    const login = await expectOk('Login', '/auth/login', {
-      method: 'POST',
-      body: { email: DEMO_EMAIL, password: DEMO_PASSWORD },
-    })
+    if (!token) {
+      const login = await expectOk('Login', '/auth/login', {
+        method: 'POST',
+        body: { email: SMOKE_LOGIN_EMAIL, password: SMOKE_LOGIN_PASSWORD },
+      })
 
-    if (!login?.token) {
-      throw new Error('Login response missing token')
+      if (!login?.token) {
+        throw new Error('Login response missing token')
+      }
+      token = login.token
+      record('Login', true, `Token issued for ${SMOKE_LOGIN_EMAIL}`)
+    } else {
+      record('Login', true, 'Using signup token')
     }
-    const token = login.token
-    record('Login', true, 'Token issued')
 
     const me = await expectOk('Profile', '/users/me', { token })
     record('Profile', Boolean(me?.id), `email=${me?.email || 'unknown'}`)

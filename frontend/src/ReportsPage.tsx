@@ -3,7 +3,8 @@
  * Renders KPI widgets, charts, and CSV export actions.
  */
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { LIVE_SYNC_INTERVAL_MS } from './config/constants'
 import { apiRequest } from './utils/helpers'
 import { downloadCSV } from './utils/reports'
@@ -169,25 +170,36 @@ export default function ReportsPage({
   token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
 }) {
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<AnalyticsOverview | null>(null)
+  const hasLoadedReportsRef = useRef(false)
+  const [reorderSortBy, setReorderSortBy] = useState<'product' | 'sku' | 'category' | 'current' | 'reorder' | 'urgency'>('urgency')
+  const [reorderSortDir, setReorderSortDir] = useState<'asc' | 'desc'>('asc')
+  const [topSortBy, setTopSortBy] = useState<'product' | 'sku' | 'category' | 'uom' | 'stock' | 'reorder' | 'status'>('stock')
+  const [topSortDir, setTopSortDir] = useState<'asc' | 'desc'>('desc')
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (showLoader = false) => {
+    if (showLoader || !hasLoadedReportsRef.current) {
+      setLoading(true)
+    }
     try {
       const resp = await apiRequest<AnalyticsOverview>('/analytics/overview', 'GET', token ?? undefined)
       setData(resp)
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
-      setLoading(false)
+      if (showLoader || !hasLoadedReportsRef.current) {
+        setLoading(false)
+        hasLoadedReportsRef.current = true
+      }
     }
   }, [token, pushToast])
 
   useEffect(() => {
-    void load()
+    void load(true)
     // Reports are heavier to query than dashboard tiles, so poll less frequently.
-    const t = setInterval(load, LIVE_SYNC_INTERVAL_MS * 4)
+    const t = setInterval(() => { void load(false) }, LIVE_SYNC_INTERVAL_MS * 4)
     return () => clearInterval(t)
   }, [load])
 
@@ -207,21 +219,96 @@ export default function ReportsPage({
   }))
 
   const OP_COLORS: Record<string, string> = {
-    Receipt: '#28a745',
-    Delivery: '#dc3545',
+    Receipt: 'var(--success)',
+    Delivery: 'var(--danger)',
     Internal: '#1565c0',
-    Adjustment: '#e0802b',
+    Adjustment: 'var(--warning)',
   }
 
+  const OP_BADGES: Record<string, string> = {
+    Receipt: 'badge-done',
+    Delivery: 'badge-canceled',
+    Internal: 'badge-ready',
+    Adjustment: 'badge-waiting',
+  }
+
+  const sortedReorderSuggestions = useMemo(() => {
+    const list = data?.reorderSuggestions ?? []
+    const copy = [...list]
+    copy.sort((a, b) => {
+      const urgencyA = a.current_stock <= 0 ? 0 : 1
+      const urgencyB = b.current_stock <= 0 ? 0 : 1
+      let cmp = 0
+      if (reorderSortBy === 'product') cmp = a.name.localeCompare(b.name)
+      else if (reorderSortBy === 'sku') cmp = a.sku.localeCompare(b.sku)
+      else if (reorderSortBy === 'category') cmp = a.category.localeCompare(b.category)
+      else if (reorderSortBy === 'current') cmp = a.current_stock - b.current_stock
+      else if (reorderSortBy === 'reorder') cmp = a.reorder_minimum - b.reorder_minimum
+      else if (reorderSortBy === 'urgency') cmp = urgencyA - urgencyB
+      return reorderSortDir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [data?.reorderSuggestions, reorderSortBy, reorderSortDir])
+
+  const sortedTopProducts = useMemo(() => {
+    const list = data?.topProducts ?? []
+    const copy = [...list]
+    copy.sort((a, b) => {
+      const statusA = a.total_stock <= a.reorder_minimum ? 0 : 1
+      const statusB = b.total_stock <= b.reorder_minimum ? 0 : 1
+      let cmp = 0
+      if (topSortBy === 'product') cmp = a.name.localeCompare(b.name)
+      else if (topSortBy === 'sku') cmp = a.sku.localeCompare(b.sku)
+      else if (topSortBy === 'category') cmp = a.category.localeCompare(b.category)
+      else if (topSortBy === 'uom') cmp = a.unit_of_measure.localeCompare(b.unit_of_measure)
+      else if (topSortBy === 'stock') cmp = a.total_stock - b.total_stock
+      else if (topSortBy === 'reorder') cmp = a.reorder_minimum - b.reorder_minimum
+      else if (topSortBy === 'status') cmp = statusA - statusB
+      return topSortDir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [data?.topProducts, topSortBy, topSortDir])
+
+  const toggleReorderSort = (key: 'product' | 'sku' | 'category' | 'current' | 'reorder' | 'urgency') => {
+    if (reorderSortBy === key) {
+      setReorderSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setReorderSortBy(key)
+    setReorderSortDir(key === 'urgency' ? 'asc' : 'desc')
+  }
+
+  const toggleTopSort = (key: 'product' | 'sku' | 'category' | 'uom' | 'stock' | 'reorder' | 'status') => {
+    if (topSortBy === key) {
+      setTopSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setTopSortBy(key)
+    setTopSortDir(key === 'stock' ? 'desc' : 'asc')
+  }
+
+  const reorderSortMark = (key: 'product' | 'sku' | 'category' | 'current' | 'reorder' | 'urgency') => (
+    reorderSortBy === key ? (reorderSortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  )
+  const topSortMark = (key: 'product' | 'sku' | 'category' | 'uom' | 'stock' | 'reorder' | 'status') => (
+    topSortBy === key ? (topSortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  )
+
+  const completedOps = (data?.operationStats ?? []).reduce((sum, item) => sum + item.done_count, 0)
+  const totalOps = (data?.operationStats ?? []).reduce((sum, item) => sum + item.total, 0)
+  const completionRate = totalOps > 0 ? Math.round((completedOps / totalOps) * 100) : 0
+  const topLocation = data?.locationStock?.[0]
+  const topCategory = data?.categoryBreakdown?.[0]
+
   return (
-    <section className="reports-page">
-      <div className="reports-header">
+    <section className="reports-page reports-revamp">
+      <div className="reports-hero">
         <div className="product-title-block">
           <h2>Reports &amp; Analytics</h2>
           <p>Stock movement trends, inventory health, and export tools for operational decisions.</p>
         </div>
-        <div className="reports-export-row">
-          <button type="button" className="btn btn-primary" onClick={() => void load()}>
+        <div className="reports-actions">
+          <button type="button" className="btn btn-primary" onClick={() => void load(true)}>
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
           <button
@@ -243,38 +330,38 @@ export default function ReportsPage({
         </div>
       </div>
 
-      <div className="rep-kpi-grid">
-        <article className="rep-kpi">
-          <div className="rep-kpi-val">{loading ? '-' : data?.totalMovements.toLocaleString()}</div>
-          <div className="rep-kpi-lbl">Total Movements</div>
+      <div className="reports-kpi-grid">
+        <article className="reports-kpi-card">
+          <div className="reports-kpi-value">{loading ? '-' : data?.totalMovements.toLocaleString()}</div>
+          <div className="reports-kpi-label">Total Movements</div>
         </article>
-        <article className="rep-kpi">
-          <div className="rep-kpi-val">{loading ? '-' : data?.categoryBreakdown.length}</div>
-          <div className="rep-kpi-lbl">Categories</div>
+        <article className="reports-kpi-card">
+          <div className="reports-kpi-value">{loading ? '-' : data?.categoryBreakdown.length}</div>
+          <div className="reports-kpi-label">Categories</div>
         </article>
-        <article className="rep-kpi rep-kpi-warn">
-          <div className="rep-kpi-val">{loading ? '-' : data?.reorderSuggestions.length}</div>
-          <div className="rep-kpi-lbl">Need Reordering</div>
+        <article className="reports-kpi-card reports-kpi-card-warn">
+          <div className="reports-kpi-value">{loading ? '-' : data?.reorderSuggestions.length}</div>
+          <div className="reports-kpi-label">Need Reordering</div>
         </article>
-        <article className="rep-kpi">
-          <div className="rep-kpi-val">{loading ? '-' : data?.dailyMovements.length}</div>
-          <div className="rep-kpi-lbl">Active Days (30d)</div>
+        <article className="reports-kpi-card">
+          <div className="reports-kpi-value">{loading ? '-' : data?.dailyMovements.length}</div>
+          <div className="reports-kpi-label">Active Days (30d)</div>
         </article>
-        <article className="rep-kpi">
-          <div className="rep-kpi-val">
+        <article className="reports-kpi-card">
+          <div className="reports-kpi-value">
             {loading ? '-' : (data?.operationStats.reduce((s, o) => s + o.total, 0) ?? 0)}
           </div>
-          <div className="rep-kpi-lbl">Ops (Last 30d)</div>
+          <div className="reports-kpi-label">Ops (Last 30d)</div>
         </article>
       </div>
 
-      <div className="rep-grid">
-        <div className="rep-card rep-card-wide">
-          <div className="rep-card-hd">
+      <div className="reports-grid">
+        <div className="reports-card reports-card-wide reports-card-chart">
+          <div className="reports-card-head">
             <h3>Stock Movements - Last 30 Days</h3>
-            <span className="muted" style={{ fontSize: '12px' }}>Total units moved per day</span>
+            <span className="reports-card-sub">Total units moved per day</span>
           </div>
-          <div className="rep-card-body">
+          <div className="reports-card-body reports-chart-body">
             {loading
               ? <div className="chart-empty">Loading chart...</div>
               : <BarChart
@@ -285,52 +372,80 @@ export default function ReportsPage({
           </div>
         </div>
 
-        <div className="rep-card">
-          <div className="rep-card-hd">
+        <div className="reports-card">
+          <div className="reports-card-head">
             <h3>Stock by Category</h3>
-            <span className="muted" style={{ fontSize: '12px' }}>Units on hand</span>
+            <span className="reports-card-sub">Units on hand</span>
           </div>
-          <div className="rep-card-body">
+          <div className="reports-card-body">
             {loading ? <div className="chart-empty">Loading...</div> : <HBars data={catChart} />}
           </div>
         </div>
 
-        <div className="rep-card">
-          <div className="rep-card-hd">
+        <div className="reports-card">
+          <div className="reports-card-head">
             <h3>Stock by Location</h3>
-            <span className="muted" style={{ fontSize: '12px' }}>Internal locations only</span>
+            <span className="reports-card-sub">Internal locations only</span>
           </div>
-          <div className="rep-card-body">
+          <div className="reports-card-body">
             {loading
               ? <div className="chart-empty">Loading...</div>
-              : <HBars data={locChart} color="#1565c0" />
+              : <HBars data={locChart} color="var(--accent)" />
             }
           </div>
         </div>
 
-        <div className="rep-card">
-          <div className="rep-card-hd">
-            <h3>Operations - Last 30 Days</h3>
-            <span className="muted" style={{ fontSize: '12px' }}>Completion by type</span>
+        <div className="reports-card">
+          <div className="reports-card-head">
+            <h3>Insights Snapshot</h3>
+            <span className="reports-card-sub">Quick view for this cycle</span>
           </div>
-          <div className="rep-card-body">
+          <div className="reports-card-body">
+            {loading ? (
+              <div className="chart-empty">Loading...</div>
+            ) : (
+              <div className="reports-insight-list">
+                <div className="reports-insight-item">
+                  <span className="reports-insight-label">Operations completion</span>
+                  <strong className="reports-insight-value">{completionRate}% ({completedOps}/{totalOps})</strong>
+                </div>
+                <div className="reports-insight-item">
+                  <span className="reports-insight-label">Top stocked location</span>
+                  <strong className="reports-insight-value">{topLocation ? `${topLocation.location_name} (${topLocation.total_stock.toLocaleString()})` : 'N/A'}</strong>
+                </div>
+                <div className="reports-insight-item">
+                  <span className="reports-insight-label">Largest category</span>
+                  <strong className="reports-insight-value">{topCategory ? `${topCategory.category} (${topCategory.total_stock.toLocaleString()})` : 'N/A'}</strong>
+                </div>
+                <div className="reports-insight-item">
+                  <span className="reports-insight-label">Products needing reorder</span>
+                  <strong className="reports-insight-value">{(data?.reorderSuggestions.length ?? 0).toLocaleString()}</strong>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="reports-card reports-card-ops">
+          <div className="reports-card-head">
+            <h3>Operations - Last 30 Days</h3>
+            <span className="reports-card-sub">Completion by type</span>
+          </div>
+          <div className="reports-card-body">
             {loading ? (
               <div className="chart-empty">Loading...</div>
             ) : !(data?.operationStats.length) ? (
               <div className="chart-empty">No operations in the last 30 days.</div>
             ) : (
-              <div className="ops-stat-list">
+              <div className="reports-ops-list">
                 {data.operationStats.map((op) => (
-                  <div key={op.type} className="ops-stat-item">
-                    <span
-                      className="ops-stat-badge"
-                      style={{ background: OP_COLORS[op.type] ?? 'var(--accent)' }}
-                    >
+                  <div key={op.type} className="reports-ops-item">
+                    <span className={`badge ${OP_BADGES[op.type] ?? 'badge-draft'} reports-ops-badge`}>
                       {op.type}
                     </span>
-                    <div className="ops-stat-track">
+                    <div className="reports-ops-track">
                       <div
-                        className="ops-stat-fill"
+                        className="reports-ops-fill"
                         style={{
                           width: `${(op.done_count / Math.max(op.total, 1)) * 100}%`,
                           background: OP_COLORS[op.type] ?? 'var(--accent)',
@@ -338,7 +453,7 @@ export default function ReportsPage({
                         title={`${op.type}: ${op.done_count}/${op.total} done`}
                       />
                     </div>
-                    <span className="ops-stat-val">{op.done_count}/{op.total} done</span>
+                    <span className="reports-ops-value">{op.done_count}/{op.total} done</span>
                   </div>
                 ))}
               </div>
@@ -346,18 +461,27 @@ export default function ReportsPage({
           </div>
         </div>
 
-        <div className="rep-card rep-card-wide rep-card-alert">
-          <div className="rep-card-hd">
+        <div className="reports-card reports-card-wide reports-card-warn">
+          <div className="reports-card-head">
             <h3>Reorder Suggestions</h3>
-            <span className="muted" style={{ fontSize: '12px' }}>
-              Products at or below reorder minimum - action required
-            </span>
+            <div className="reports-card-meta">
+              <span className="reports-card-sub">
+                Products at or below reorder minimum - action required
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => navigate('/products?lowStockOnly=true')}
+              >
+                Open in Products
+              </button>
+            </div>
           </div>
-          <div className="rep-card-body" style={{ padding: 0 }}>
+          <div className="reports-table-wrap">
             {loading ? (
               <div className="chart-empty">Loading...</div>
             ) : !(data?.reorderSuggestions.length) ? (
-              <div className="chart-empty" style={{ padding: '24px' }}>
+              <div className="chart-empty reports-table-empty">
                 All products are above their reorder minimums. No action needed.
               </div>
             ) : (
@@ -365,16 +489,16 @@ export default function ReportsPage({
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Product</th>
-                      <th>SKU</th>
-                      <th>Category</th>
-                      <th>Current Stock</th>
-                      <th>Reorder Min</th>
-                      <th>Urgency</th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleReorderSort('product')}>Product{reorderSortMark('product')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleReorderSort('sku')}>SKU{reorderSortMark('sku')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleReorderSort('category')}>Category{reorderSortMark('category')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleReorderSort('current')}>Current Stock{reorderSortMark('current')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleReorderSort('reorder')}>Reorder Min{reorderSortMark('reorder')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleReorderSort('urgency')}>Urgency{reorderSortMark('urgency')}</button></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.reorderSuggestions.map((item) => {
+                    {sortedReorderSuggestions.map((item) => {
                       const isOut = item.current_stock <= 0
                       return (
                         <tr key={item.id}>
@@ -402,32 +526,32 @@ export default function ReportsPage({
           </div>
         </div>
 
-        <div className="rep-card rep-card-wide">
-          <div className="rep-card-hd">
+        <div className="reports-card reports-card-wide">
+          <div className="reports-card-head">
             <h3>Top Products by On-Hand Stock</h3>
-            <span className="muted" style={{ fontSize: '12px' }}>Highest available inventory</span>
+            <span className="reports-card-sub">Highest available inventory</span>
           </div>
-          <div className="rep-card-body" style={{ padding: 0 }}>
+          <div className="reports-table-wrap">
             {loading ? (
               <div className="chart-empty">Loading...</div>
             ) : !(data?.topProducts.length) ? (
-              <div className="chart-empty" style={{ padding: '24px' }}>No products found.</div>
+              <div className="chart-empty reports-table-empty">No products found.</div>
             ) : (
               <div className="data-table-wrap">
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Product</th>
-                      <th>SKU</th>
-                      <th>Category</th>
-                      <th>UoM</th>
-                      <th>Stock</th>
-                      <th>Reorder Min</th>
-                      <th>Status</th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleTopSort('product')}>Product{topSortMark('product')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleTopSort('sku')}>SKU{topSortMark('sku')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleTopSort('category')}>Category{topSortMark('category')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleTopSort('uom')}>UoM{topSortMark('uom')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleTopSort('stock')}>Stock{topSortMark('stock')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleTopSort('reorder')}>Reorder Min{topSortMark('reorder')}</button></th>
+                      <th><button type="button" className="table-sort-btn" onClick={() => toggleTopSort('status')}>Status{topSortMark('status')}</button></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.topProducts.map((p) => {
+                    {sortedTopProducts.map((p) => {
                       const isLow = p.total_stock <= p.reorder_minimum
                       return (
                         <tr key={p.id}>

@@ -3,8 +3,9 @@
  * Provides product catalog management, stock drilldowns, and filtering.
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest, safeNumber } from '../utils/helpers'
 import { hasElevatedAccess } from '../utils/authHelpers'
 import { useConfirm } from '../hooks/useConfirm'
@@ -42,6 +43,8 @@ function downloadCSV(path: string, filename: string, token: string | null, pushT
 }
 
 export default function ProductsPage({ token, pushToast, currentUser }: Props) {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { modal, confirm } = useConfirm()
   const canManage = hasElevatedAccess(currentUser)
 
@@ -68,6 +71,21 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const [uom,           setUom]           = useState('Units')
   const [initialStock,  setInitialStock]  = useState('0')
   const [reorderMin,    setReorderMin]    = useState('0')
+  const [sortBy, setSortBy] = useState<'name' | 'sku' | 'category' | 'uom' | 'stock' | 'location' | 'status'>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const nextSearch = params.get('search') ?? ''
+    const nextCategory = params.get('category') ?? ''
+    const nextLocation = params.get('location') ?? ''
+    const nextLowStock = params.get('lowStockOnly') === 'true'
+
+    setSearch((prev) => (prev === nextSearch ? prev : nextSearch))
+    setFilterCategory((prev) => (prev === nextCategory ? prev : nextCategory))
+    setFilterLocation((prev) => (prev === nextLocation ? prev : nextLocation))
+    setLowStockOnly((prev) => (prev === nextLowStock ? prev : nextLowStock))
+  }, [location.search])
 
   const resetForm = () => {
     setEditingProductId(null); setName(''); setSku(''); setCategory('')
@@ -86,8 +104,12 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     setViewMode('form')
   }
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const hasLoadedProductsRef = useRef(false)
+
+  const load = useCallback(async (showLoader = false) => {
+    if (showLoader || !hasLoadedProductsRef.current) {
+      setLoading(true)
+    }
     try {
       const params = new URLSearchParams()
       if (search.trim())         params.set('search',       search.trim())
@@ -100,7 +122,10 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
-      setLoading(false)
+      if (showLoader || !hasLoadedProductsRef.current) {
+        setLoading(false)
+        hasLoadedProductsRef.current = true
+      }
     }
   }, [filterCategory, filterLocation, lowStockOnly, search, token, pushToast])
 
@@ -118,10 +143,24 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   useEffect(() => { void loadFilterOptions() }, [loadFilterOptions])
 
   useEffect(() => {
-    void load()
-    const t = setInterval(() => { void load(); void loadFilterOptions() }, LIVE_SYNC_INTERVAL_MS)
+    void load(true)
+    const t = setInterval(() => { void load(false); void loadFilterOptions() }, LIVE_SYNC_INTERVAL_MS)
     return () => clearInterval(t)
   }, [load, loadFilterOptions])
+
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (search.trim()) params.set('search', search.trim())
+    if (filterCategory.trim()) params.set('category', filterCategory.trim())
+    if (filterLocation.trim()) params.set('location', filterLocation.trim())
+    if (lowStockOnly) params.set('lowStockOnly', 'true')
+
+    const next = params.toString()
+    const current = location.search.startsWith('?') ? location.search.slice(1) : location.search
+    if (next !== current) {
+      navigate({ pathname: location.pathname, search: next ? `?${next}` : '' }, { replace: true })
+    }
+  }, [search, filterCategory, filterLocation, lowStockOnly, location.pathname, location.search, navigate])
 
   const categoryOptions = useMemo(
     () => Array.from(new Set([...DEFAULT_CATEGORIES, ...filterOptions.categories, category].filter(Boolean))),
@@ -159,7 +198,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
         })
         pushToast('success', 'Product saved')
       }
-      resetForm(); await loadFilterOptions(); void load(); setViewMode('list')
+      resetForm(); await loadFilterOptions(); void load(false); setViewMode('list')
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
@@ -169,15 +208,20 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
 
   const deleteProduct = async () => {
     if (!editingProductId || !canManage) return
-    const ok = await confirm('Delete this product?', 'This action cannot be undone.')
+    const ok = await confirm('Delete this product?', 'Deletion is allowed only if the product has no operation or ledger history.')
     if (!ok) return
     setSaving(true)
     try {
       await apiRequest(`/products/${editingProductId}`, 'DELETE', token ?? undefined)
       pushToast('success', 'Product deleted')
-      resetForm(); await loadFilterOptions(); void load(); setViewMode('list')
+      resetForm(); await loadFilterOptions(); void load(false); setViewMode('list')
     } catch (err) {
-      pushToast('error', (err as Error).message)
+      const message = (err as Error).message || 'Failed to delete product'
+      if (message.toLowerCase().includes('cannot be deleted') || message.toLowerCase().includes('history')) {
+        pushToast('info', `${message} This is expected to preserve audit traceability.`)
+      } else {
+        pushToast('error', message)
+      }
     } finally {
       setSaving(false)
     }
@@ -201,6 +245,39 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const totalStock  = useMemo(() => products.reduce((s, p) => s + safeNumber(p.availableStock), 0), [products])
   const lowCount    = useMemo(() => products.filter((p) => safeNumber(p.availableStock) <= safeNumber(p.reorder_minimum)).length, [products])
   const activeCount = [search.trim(), filterCategory.trim(), filterLocation.trim(), lowStockOnly ? '1' : ''].filter(Boolean).length
+
+  const sortedProducts = useMemo(() => {
+    const getStatusRank = (p: Product) => (
+      safeNumber(p.availableStock) <= safeNumber(p.reorder_minimum) ? 0 : 1
+    )
+    const copy = [...products]
+    copy.sort((a, b) => {
+      let cmp = 0
+      if (sortBy === 'name') cmp = a.name.localeCompare(b.name)
+      else if (sortBy === 'sku') cmp = a.sku.localeCompare(b.sku)
+      else if (sortBy === 'category') cmp = a.category.localeCompare(b.category)
+      else if (sortBy === 'uom') cmp = a.unit_of_measure.localeCompare(b.unit_of_measure)
+      else if (sortBy === 'stock') cmp = safeNumber(a.availableStock) - safeNumber(b.availableStock)
+      else if (sortBy === 'location') cmp = String(a.locationName || '').localeCompare(String(b.locationName || ''))
+      else if (sortBy === 'status') cmp = getStatusRank(a) - getStatusRank(b)
+
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [products, sortBy, sortDir])
+
+  const toggleSort = (key: 'name' | 'sku' | 'category' | 'uom' | 'stock' | 'location' | 'status') => {
+    if (sortBy === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortBy(key)
+    setSortDir('asc')
+  }
+
+  const sortMark = (key: 'name' | 'sku' | 'category' | 'uom' | 'stock' | 'location' | 'status') => (
+    sortBy === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  )
 
   return (
     <section className="product-page">
@@ -269,7 +346,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                   <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
                   Low stock only
                 </label>
-                <button type="button" className="btn btn-primary" onClick={() => void load()}>Apply</button>
+                <button type="button" className="btn btn-primary" onClick={() => void load(true)}>Apply</button>
               </div>
             </div>
           </div>
@@ -286,14 +363,20 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Name</th><th>SKU</th><th>Category</th><th>UoM</th>
-                    <th>On Hand</th><th>Location</th><th>Status</th><th>Action</th>
+                    <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('name')}>Name{sortMark('name')}</button></th>
+                    <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('sku')}>SKU{sortMark('sku')}</button></th>
+                    <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('category')}>Category{sortMark('category')}</button></th>
+                    <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('uom')}>UoM{sortMark('uom')}</button></th>
+                    <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('stock')}>On Hand{sortMark('stock')}</button></th>
+                    <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('location')}>Location{sortMark('location')}</button></th>
+                    <th><button type="button" className="table-sort-btn" onClick={() => toggleSort('status')}>Status{sortMark('status')}</button></th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && !products.length && <tr className="empty-row"><td colSpan={8}>Loading products...</td></tr>}
                   {!loading && !products.length && <tr className="empty-row"><td colSpan={8}>No products found.</td></tr>}
-                  {products.map((p) => (
+                  {sortedProducts.map((p) => (
                     <Fragment key={p.id}>
                       <tr>
                         <td>

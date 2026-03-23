@@ -42,6 +42,36 @@ router.post('/', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   }
 })
 
+router.get('/:id/inventory', requireAuth, async (req, res) => {
+  const locationId = Number(req.params.id)
+  if (!Number.isFinite(locationId)) return res.status(400).json({ message: 'Invalid location id' })
+
+  try {
+    const db = await getDb()
+    const location = await db.get('SELECT id FROM Locations WHERE id = ?', locationId)
+    if (!location) return res.status(404).json({ message: 'Location not found' })
+
+    const rows = await db.all(
+      `SELECT p.id AS product_id,
+              p.name AS product_name,
+              p.sku,
+              p.unit_of_measure,
+              p.reorder_minimum,
+              COALESCE(sq.quantity, 0) AS quantity
+         FROM Stock_Quants sq
+         JOIN Products p ON p.id = sq.product_id
+        WHERE sq.location_id = ?
+          AND COALESCE(sq.quantity, 0) > 0
+        ORDER BY p.name ASC`,
+      locationId,
+    )
+
+    return res.json(rows)
+  } catch {
+    return res.status(500).json({ message: 'Failed to load location inventory' })
+  }
+})
+
 router.delete('/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   const locationId = Number(req.params.id)
   if (!Number.isFinite(locationId)) return res.status(400).json({ message: 'Invalid location id' })
@@ -57,6 +87,11 @@ router.delete('/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) 
     }
 
     await db.transaction(async (tx) => {
+      // Preserve historical rows by nulling location references before deletion.
+      await tx.run('UPDATE Operations SET source_location_id = NULL WHERE source_location_id = ?', locationId)
+      await tx.run('UPDATE Operations SET destination_location_id = NULL WHERE destination_location_id = ?', locationId)
+      await tx.run('UPDATE Stock_Ledger SET from_location_id = NULL WHERE from_location_id = ?', locationId)
+      await tx.run('UPDATE Stock_Ledger SET to_location_id = NULL WHERE to_location_id = ?', locationId)
       await tx.run('DELETE FROM Stock_Quants WHERE location_id = ?', locationId)
       await tx.run('DELETE FROM Locations WHERE id = ?', locationId)
       await tx.run(

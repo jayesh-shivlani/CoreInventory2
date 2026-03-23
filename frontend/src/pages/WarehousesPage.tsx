@@ -3,14 +3,14 @@
  * Handles location listing, creation, and deletion workflows.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { apiRequest } from '../utils/helpers'
+import { apiRequest, safeNumber } from '../utils/helpers'
 import { hasElevatedAccess } from '../utils/authHelpers'
 import { useConfirm } from '../hooks/useConfirm'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { LIVE_SYNC_INTERVAL_MS } from '../config/constants'
-import type { Toast, UserProfile, Warehouse } from '../types/models'
+import type { Toast, UserProfile, Warehouse, WarehouseInventoryRow } from '../types/models'
 
 interface Props {
   token:       string | null
@@ -27,23 +27,38 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
   const [loading,    setLoading]    = useState(true)
   const [name, setName] = useState('')
   const [type, setType] = useState('Internal')
+  const [expandedLocationId, setExpandedLocationId] = useState<number | null>(null)
+  const [inventoryLoadingId, setInventoryLoadingId] = useState<number | null>(null)
+  const [locationInventory, setLocationInventory] = useState<Record<number, WarehouseInventoryRow[]>>({})
+  const [inventorySearchByLocation, setInventorySearchByLocation] = useState<Record<number, string>>({})
+  const [adjustingKey, setAdjustingKey] = useState<string | null>(null)
+  const [warehouseSortBy, setWarehouseSortBy] = useState<'name' | 'type'>('name')
+  const [warehouseSortDir, setWarehouseSortDir] = useState<'asc' | 'desc'>('asc')
+  const [inventorySortByLocation, setInventorySortByLocation] = useState<Record<number, { key: 'product' | 'sku' | 'quantity' | 'uom' | 'reorder' | 'status'; dir: 'asc' | 'desc' }>>({})
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const hasLoadedWarehousesRef = useRef(false)
+
+  const load = useCallback(async (showLoader = false) => {
+    if (showLoader || !hasLoadedWarehousesRef.current) {
+      setLoading(true)
+    }
     try {
       const data = await apiRequest<Warehouse[]>('/locations', 'GET', token ?? undefined)
       setWarehouses(Array.isArray(data) ? data : [])
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
-      setLoading(false)
+      if (showLoader || !hasLoadedWarehousesRef.current) {
+        setLoading(false)
+        hasLoadedWarehousesRef.current = true
+      }
     }
   }, [token, pushToast])
 
   useEffect(() => {
-    void load()
+    void load(true)
     // Keep location lists synchronized for users that may be editing from multiple sessions.
-    const t = setInterval(load, LIVE_SYNC_INTERVAL_MS)
+    const t = setInterval(() => { void load(false) }, LIVE_SYNC_INTERVAL_MS)
     return () => clearInterval(t)
   }, [load])
 
@@ -55,7 +70,7 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
       await apiRequest('/locations', 'POST', token ?? undefined, { name: name.trim(), type })
       setName(''); setType('Internal')
       pushToast('success', 'Warehouse saved')
-      void load()
+      void load(false)
     } catch (err) {
       pushToast('error', (err as Error).message)
     }
@@ -68,15 +83,158 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
     try {
       await apiRequest(`/locations/${id}`, 'DELETE', token ?? undefined)
       pushToast('success', 'Warehouse deleted')
-      void load()
+      void load(false)
     } catch (err) {
       pushToast('error', (err as Error).message)
+    }
+  }
+
+  const toggleWarehouseInventory = async (warehouseId: number) => {
+    if (expandedLocationId === warehouseId) {
+      setExpandedLocationId(null)
+      return
+    }
+
+    setExpandedLocationId(warehouseId)
+    if (locationInventory[warehouseId]) return
+
+    setInventoryLoadingId(warehouseId)
+    try {
+      const rows = await apiRequest<WarehouseInventoryRow[]>(`/locations/${warehouseId}/inventory`, 'GET', token ?? undefined)
+      setLocationInventory((prev) => ({
+        ...prev,
+        [warehouseId]: Array.isArray(rows) ? rows : [],
+      }))
+    } catch (err) {
+      pushToast('error', (err as Error).message)
+      setExpandedLocationId(null)
+    } finally {
+      setInventoryLoadingId(null)
+    }
+  }
+
+  const exportWarehouseInventory = (warehouseName: string, rows: WarehouseInventoryRow[]) => {
+    const escapeCsv = (value: string | number) => String(value).replaceAll('"', '""')
+    const header = ['Product', 'SKU', 'Quantity', 'UoM', 'Reorder Min', 'Status']
+    const dataRows = rows.map((row) => {
+      const qty = safeNumber(row.quantity)
+      const reorderMin = safeNumber(row.reorder_minimum)
+      const status = reorderMin > 0 && qty <= reorderMin ? 'Low Stock' : 'In Stock'
+      return [
+        `"${escapeCsv(row.product_name)}"`,
+        `"${escapeCsv(row.sku)}"`,
+        qty,
+        `"${escapeCsv(row.unit_of_measure)}"`,
+        reorderMin,
+        `"${status}"`,
+      ].join(',')
+    })
+    const csv = `${header.join(',')}\n${dataRows.join('\n')}`
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${warehouseName.toLowerCase().replace(/\s+/g, '_')}_inventory.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    pushToast('success', `${warehouseName} inventory exported`) 
+  }
+
+  const adjustWarehouseStock = async (warehouse: Warehouse, row: WarehouseInventoryRow) => {
+    if (!canManage) {
+      pushToast('error', 'Only admin-approved roles can adjust stock.')
+      return
+    }
+
+    const currentQty = safeNumber(row.quantity)
+    const raw = window.prompt(`Set new quantity for ${row.product_name} (${row.sku})`, String(currentQty))
+    if (raw === null) return
+
+    const nextQty = Number(raw)
+    if (!Number.isFinite(nextQty) || nextQty < 0) {
+      pushToast('error', 'Quantity must be a non-negative number')
+      return
+    }
+
+    const key = `${warehouse.id}-${row.product_id}`
+    setAdjustingKey(key)
+    try {
+      const created = await apiRequest<{ id: number }>('/operations', 'POST', token ?? undefined, {
+        type: 'Adjustment',
+        source_location: warehouse.name,
+        destination_location: warehouse.name,
+        lines: [{ product_id: row.product_id, requested_quantity: nextQty }],
+      })
+
+      await apiRequest(`/operations/${created.id}/validate`, 'POST', token ?? undefined)
+
+      setLocationInventory((prev) => ({
+        ...prev,
+        [warehouse.id]: (prev[warehouse.id] || []).map((item) => (
+          item.product_id === row.product_id ? { ...item, quantity: nextQty } : item
+        )),
+      }))
+
+      pushToast('success', `Stock adjusted for ${row.product_name}`)
+      void load(false)
+    } catch (err) {
+      pushToast('error', (err as Error).message)
+    } finally {
+      setAdjustingKey(null)
     }
   }
 
   const internalCount = warehouses.filter((w) => w.type.toLowerCase() === 'internal').length
   const vendorCount   = warehouses.filter((w) => w.type.toLowerCase() === 'vendor').length
   const customerCount = warehouses.filter((w) => w.type.toLowerCase() === 'customer').length
+
+  const sortedWarehouses = useMemo(() => {
+    const copy = [...warehouses]
+    copy.sort((a, b) => {
+      const cmp = warehouseSortBy === 'name'
+        ? a.name.localeCompare(b.name)
+        : a.type.localeCompare(b.type)
+      return warehouseSortDir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [warehouses, warehouseSortBy, warehouseSortDir])
+
+  const toggleWarehouseSort = (key: 'name' | 'type') => {
+    if (warehouseSortBy === key) {
+      setWarehouseSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setWarehouseSortBy(key)
+    setWarehouseSortDir('asc')
+  }
+
+  const warehouseSortMark = (key: 'name' | 'type') => (
+    warehouseSortBy === key ? (warehouseSortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  )
+
+  const toggleInventorySort = (locationId: number, key: 'product' | 'sku' | 'quantity' | 'uom' | 'reorder' | 'status') => {
+    setInventorySortByLocation((prev) => {
+      const current = prev[locationId]
+      if (current?.key === key) {
+        return {
+          ...prev,
+          [locationId]: { key, dir: current.dir === 'asc' ? 'desc' : 'asc' },
+        }
+      }
+      return {
+        ...prev,
+        [locationId]: { key, dir: 'asc' },
+      }
+    })
+  }
+
+  const inventorySortMark = (locationId: number, key: 'product' | 'sku' | 'quantity' | 'uom' | 'reorder' | 'status') => {
+    const current = inventorySortByLocation[locationId]
+    if (!current || current.key !== key) return ''
+    return current.dir === 'asc' ? ' ▲' : ' ▼'
+  }
 
   return (
     <section className="warehouses-page">
@@ -140,27 +298,176 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
           <div className="data-table-wrap">
             <table className="data-table">
               <thead>
-                <tr><th>Name</th><th>Type</th><th>Action</th></tr>
+                <tr>
+                  <th><button type="button" className="table-sort-btn" onClick={() => toggleWarehouseSort('name')}>Name{warehouseSortMark('name')}</button></th>
+                  <th><button type="button" className="table-sort-btn" onClick={() => toggleWarehouseSort('type')}>Type{warehouseSortMark('type')}</button></th>
+                  <th>Inventory</th>
+                  <th>Action</th>
+                </tr>
               </thead>
               <tbody>
-                {loading && !warehouses.length && <tr className="empty-row"><td colSpan={3}>Loading...</td></tr>}
-                {!loading && !warehouses.length && <tr className="empty-row"><td colSpan={3}>No locations configured yet.</td></tr>}
-                {warehouses.map((wh) => (
-                  <tr key={wh.id}>
-                    <td><strong>{wh.name}</strong></td>
-                    <td><span className="badge badge-draft">{wh.type}</span></td>
-                    <td>
-                      {canManage ? (
-                        <button type="button" className="btn-icon" onClick={() => void deleteWarehouse(wh.id)} title="Delete location">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
-                            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                          </svg>
+                {loading && !warehouses.length && <tr className="empty-row"><td colSpan={4}>Loading...</td></tr>}
+                {!loading && !warehouses.length && <tr className="empty-row"><td colSpan={4}>No locations configured yet.</td></tr>}
+                {sortedWarehouses.map((wh) => (
+                  <Fragment key={wh.id}>
+                    <tr>
+                      <td><strong>{wh.name}</strong></td>
+                      <td><span className="badge badge-draft">{wh.type}</span></td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => { void toggleWarehouseInventory(wh.id) }}
+                        >
+                          {expandedLocationId === wh.id ? 'Hide Stock' : 'View Stock'}
                         </button>
-                      ) : (
-                        <span className="muted">Contact admin</span>
-                      )}
-                    </td>
-                  </tr>
+                      </td>
+                      <td>
+                        {canManage ? (
+                          <button type="button" className="btn-icon" onClick={() => void deleteWarehouse(wh.id)} title="Delete location">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
+                              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                          </button>
+                        ) : (
+                          <span className="muted">Contact admin</span>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedLocationId === wh.id && (
+                      <tr>
+                        <td colSpan={4}>
+                          {inventoryLoadingId === wh.id ? (
+                            <p className="muted">Loading stock details...</p>
+                          ) : (locationInventory[wh.id] || []).length === 0 ? (
+                            <p className="muted">No products currently stocked in this location.</p>
+                          ) : (
+                            <>
+                              {(() => {
+                                const rows = locationInventory[wh.id] || []
+                                const query = (inventorySearchByLocation[wh.id] || '').trim().toLowerCase()
+                                const filteredRows = query
+                                  ? rows.filter((row) =>
+                                      row.product_name.toLowerCase().includes(query)
+                                      || row.sku.toLowerCase().includes(query),
+                                    )
+                                  : rows
+                                const inventorySort = inventorySortByLocation[wh.id] || { key: 'product', dir: 'asc' as const }
+                                const sortedFilteredRows = [...filteredRows].sort((a, b) => {
+                                  const aQty = safeNumber(a.quantity)
+                                  const bQty = safeNumber(b.quantity)
+                                  const aReorder = safeNumber(a.reorder_minimum)
+                                  const bReorder = safeNumber(b.reorder_minimum)
+                                  const aLow = aReorder > 0 && aQty <= aReorder ? 0 : 1
+                                  const bLow = bReorder > 0 && bQty <= bReorder ? 0 : 1
+
+                                  let cmp = 0
+                                  if (inventorySort.key === 'product') cmp = a.product_name.localeCompare(b.product_name)
+                                  else if (inventorySort.key === 'sku') cmp = a.sku.localeCompare(b.sku)
+                                  else if (inventorySort.key === 'quantity') cmp = aQty - bQty
+                                  else if (inventorySort.key === 'uom') cmp = a.unit_of_measure.localeCompare(b.unit_of_measure)
+                                  else if (inventorySort.key === 'reorder') cmp = aReorder - bReorder
+                                  else if (inventorySort.key === 'status') cmp = aLow - bLow
+
+                                  return inventorySort.dir === 'asc' ? cmp : -cmp
+                                })
+                                const totalUnits = rows.reduce((sum, row) => sum + safeNumber(row.quantity), 0)
+                                const lowStockCount = rows.filter((row) => {
+                                  const reorderMin = safeNumber(row.reorder_minimum)
+                                  return reorderMin > 0 && safeNumber(row.quantity) <= reorderMin
+                                }).length
+
+                                return (
+                                  <div className="inline-stock-card" style={{ marginTop: 8 }}>
+                                    <div className="operations-overview-top" style={{ marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+                                      <div className="list-header-meta" style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                                        <span className="muted">Products: <strong>{rows.length}</strong></span>
+                                        <span className="muted">Total Units: <strong>{safeNumber(totalUnits)}</strong></span>
+                                        <span className="muted">Low Stock: <strong>{lowStockCount}</strong></span>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+                                        <input
+                                          className="search-input"
+                                          value={inventorySearchByLocation[wh.id] || ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value
+                                            setInventorySearchByLocation((prev) => ({ ...prev, [wh.id]: value }))
+                                          }}
+                                          placeholder="Search product or SKU"
+                                          style={{ minHeight: 34, width: 220 }}
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          onClick={() => exportWarehouseInventory(wh.name, filteredRows)}
+                                        >
+                                          Export CSV
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className="data-table-wrap">
+                                      <table className="data-table nested-table">
+                                        <thead>
+                                          <tr>
+                                            <th><button type="button" className="table-sort-btn" onClick={() => toggleInventorySort(wh.id, 'product')}>Product{inventorySortMark(wh.id, 'product')}</button></th>
+                                            <th><button type="button" className="table-sort-btn" onClick={() => toggleInventorySort(wh.id, 'sku')}>SKU{inventorySortMark(wh.id, 'sku')}</button></th>
+                                            <th><button type="button" className="table-sort-btn" onClick={() => toggleInventorySort(wh.id, 'quantity')}>Quantity{inventorySortMark(wh.id, 'quantity')}</button></th>
+                                            <th><button type="button" className="table-sort-btn" onClick={() => toggleInventorySort(wh.id, 'uom')}>UoM{inventorySortMark(wh.id, 'uom')}</button></th>
+                                            <th><button type="button" className="table-sort-btn" onClick={() => toggleInventorySort(wh.id, 'reorder')}>Reorder Min{inventorySortMark(wh.id, 'reorder')}</button></th>
+                                            <th><button type="button" className="table-sort-btn" onClick={() => toggleInventorySort(wh.id, 'status')}>Status{inventorySortMark(wh.id, 'status')}</button></th>
+                                            <th>Action</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {!sortedFilteredRows.length && (
+                                            <tr className="empty-row"><td colSpan={7}>No matching products for this location.</td></tr>
+                                          )}
+                                          {sortedFilteredRows.map((row) => {
+                                            const qty = safeNumber(row.quantity)
+                                            const reorderMin = safeNumber(row.reorder_minimum)
+                                            const isLow = reorderMin > 0 && qty <= reorderMin
+                                            return (
+                                              <tr key={`${wh.id}-${row.product_id}`}>
+                                                <td><strong>{row.product_name}</strong></td>
+                                                <td>{row.sku}</td>
+                                                <td>{qty}</td>
+                                                <td>{row.unit_of_measure}</td>
+                                                <td>{reorderMin}</td>
+                                                <td>
+                                                  <span className={`badge ${isLow ? 'badge-waiting' : 'badge-done'}`}>
+                                                    {isLow ? 'Low Stock' : 'In Stock'}
+                                                  </span>
+                                                </td>
+                                                <td>
+                                                  {canManage ? (
+                                                    <button
+                                                      type="button"
+                                                      className="btn btn-secondary btn-sm"
+                                                      disabled={adjustingKey === `${wh.id}-${row.product_id}`}
+                                                      onClick={() => { void adjustWarehouseStock(wh, row) }}
+                                                    >
+                                                      {adjustingKey === `${wh.id}-${row.product_id}` ? 'Adjusting...' : 'Adjust'}
+                                                    </button>
+                                                  ) : (
+                                                    <span className="muted">Read-only</span>
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            )
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )
+                              })()}
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
