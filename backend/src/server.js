@@ -1086,6 +1086,38 @@ app.get('/api/locations', requireAuth, async (req, res) => {
   res.json(rows)
 })
 
+app.get('/api/locations/:id/inventory', requireAuth, async (req, res) => {
+  const locationId = Number(req.params.id)
+  if (!Number.isFinite(locationId)) {
+    return res.status(400).json({ message: 'Invalid location id' })
+  }
+
+  const db = await getDb()
+  const location = await db.get('SELECT id FROM Locations WHERE id = ?', locationId)
+  if (!location) {
+    return res.status(404).json({ message: 'Location not found' })
+  }
+
+  const rows = await db.all(
+    `
+      SELECT
+        p.id AS product_id,
+        p.name AS product_name,
+        p.sku,
+        p.unit_of_measure,
+        sq.quantity
+      FROM Stock_Quants sq
+      JOIN Products p ON p.id = sq.product_id
+      WHERE sq.location_id = ?
+        AND sq.quantity > 0
+      ORDER BY p.name ASC
+    `,
+    locationId,
+  )
+
+  return res.json(rows)
+})
+
 app.post('/api/locations', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   try {
     const { name, type } = req.body || {}
@@ -1583,6 +1615,32 @@ app.post('/api/operations', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'At least one operation line is required' })
   }
 
+  const normalizedSupplier = String(supplier || '').trim()
+  const normalizedSource = String(source_location || '').trim()
+  const normalizedDestination = String(destination_location || '').trim()
+
+  if (type === 'Receipt' && !normalizedSupplier) {
+    return res.status(400).json({ message: 'Supplier is required for receipts' })
+  }
+
+  if ((type === 'Delivery' || type === 'Internal') && !normalizedSource) {
+    return res.status(400).json({ message: 'Source location is required for this operation type' })
+  }
+
+  if ((type === 'Delivery' || type === 'Internal') && !normalizedDestination) {
+    return res.status(400).json({ message: 'Destination location is required for this operation type' })
+  }
+
+  if (type === 'Adjustment' && !normalizedDestination) {
+    return res.status(400).json({ message: 'Inventory location is required for adjustments' })
+  }
+
+  if ((type === 'Delivery' || type === 'Internal') && normalizedSource.toLowerCase() === normalizedDestination.toLowerCase()) {
+    return res.status(400).json({ message: 'Source and destination locations must be different' })
+  }
+
+  const seenProducts = new Set()
+
   for (const line of lines) {
     const productId = Number(line.product_id)
     const qty = Number(line.requested_quantity)
@@ -1591,6 +1649,10 @@ app.post('/api/operations', requireAuth, async (req, res) => {
     if (!Number.isFinite(productId) || productId <= 0) {
       return res.status(400).json({ message: 'Each line requires a valid product_id' })
     }
+    if (seenProducts.has(productId)) {
+      return res.status(400).json({ message: 'Each product should appear only once per operation document' })
+    }
+    seenProducts.add(productId)
     if (!Number.isFinite(qty) || qty < 0) {
       return res.status(400).json({ message: 'Quantities must be non-negative numbers' })
     }
@@ -1897,14 +1959,21 @@ app.post('/api/operations/:id/status', requireAuth, async (req, res) => {
   }
 
   const nextStatus = String(req.body?.status || '').trim()
+  const statusNote = String(req.body?.note || '').trim()
   const allowedStatuses = ['Draft', 'Waiting', 'Ready', 'Canceled']
   if (!allowedStatuses.includes(nextStatus)) {
     return res.status(400).json({ message: 'Invalid status value' })
   }
+  if (statusNote.length > 500) {
+    return res.status(400).json({ message: 'Status note must be 500 characters or fewer' })
+  }
+  if (nextStatus === 'Canceled' && !statusNote) {
+    return res.status(400).json({ message: 'Cancellation reason is required when setting status to Canceled' })
+  }
 
   const db = await getDb()
   try {
-    const operation = await db.get('SELECT id, status FROM Operations WHERE id = ?', operationId)
+    const operation = await db.get('SELECT id, status, reference_number, type FROM Operations WHERE id = ?', operationId)
     if (!operation) {
       return res.status(404).json({ message: 'Operation not found' })
     }
@@ -1928,8 +1997,25 @@ app.post('/api/operations/:id/status', requireAuth, async (req, res) => {
       return res.status(400).json({ message: `Cannot move status from ${operation.status} to ${nextStatus}` })
     }
 
-    await db.run('UPDATE Operations SET status = ? WHERE id = ?', nextStatus, operationId)
-    return res.json({ message: 'Status updated', id: operationId, status: nextStatus })
+    await db.exec('BEGIN')
+    try {
+      await db.run('UPDATE Operations SET status = ? WHERE id = ?', nextStatus, operationId)
+
+      if (nextStatus === 'Canceled') {
+        const ref = operation.reference_number || `#${operationId}`
+        await db.run(
+          'INSERT INTO Stock_Ledger (operation_id, note) VALUES (?, ?)',
+          operationId,
+          `Operation ${ref} (${operation.type}) canceled. Reason: ${statusNote}`,
+        )
+      }
+
+      await db.exec('COMMIT')
+      return res.json({ message: 'Status updated', id: operationId, status: nextStatus })
+    } catch (error) {
+      await db.exec('ROLLBACK')
+      throw error
+    }
   } catch (error) {
     return res.status(500).json({ message: 'Failed to update operation status' })
   }
@@ -1978,28 +2064,246 @@ app.delete('/api/locations/:id', requireAuth, requireRole(MANAGER_ROLES), async 
 })
 
 app.get('/api/ledger', requireAuth, async (req, res) => {
-  const db = await getDb()
-  const rows = await db.all(
-    `
+  try {
+    const db = await getDb()
+    const search = String(req.query.search || '').trim()
+    const dateFrom = String(req.query.dateFrom || '').trim()
+    const dateTo = String(req.query.dateTo || '').trim()
+    const opType = String(req.query.type || '').trim()
+
+    const conditions = []
+    const values = []
+
+    if (search) {
+      conditions.push("(p.name ILIKE ? OR COALESCE(o.reference_number, '') ILIKE ?)")
+      values.push(`%${search}%`, `%${search}%`)
+    }
+    if (dateFrom) {
+      conditions.push('sl.timestamp >= ?::date')
+      values.push(dateFrom)
+    }
+    if (dateTo) {
+      conditions.push("sl.timestamp < (?::date + INTERVAL '1 day')")
+      values.push(dateTo)
+    }
+    if (opType) {
+      conditions.push('o.type = ?')
+      values.push(opType)
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+    const rows = await db.all(
+      `
+        SELECT
+          sl.id,
+          sl.timestamp,
+          p.name AS product_name,
+          src.name AS from_location_name,
+          dst.name AS to_location_name,
+          sl.quantity,
+          o.reference_number,
+          o.type AS operation_type,
+          sl.note
+        FROM Stock_Ledger sl
+        LEFT JOIN Products p ON p.id = sl.product_id
+        LEFT JOIN Locations src ON src.id = sl.from_location_id
+        LEFT JOIN Locations dst ON dst.id = sl.to_location_id
+        LEFT JOIN Operations o ON o.id = sl.operation_id
+        ${where}
+        ORDER BY sl.timestamp DESC, sl.id DESC
+        LIMIT 1000
+      `,
+      ...values,
+    )
+
+    res.json(rows)
+  } catch {
+    res.status(500).json({ message: 'Failed to fetch ledger' })
+  }
+})
+
+app.get('/api/analytics/overview', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb()
+
+    const [
+      dailyMovements,
+      categoryBreakdown,
+      topProducts,
+      operationStats,
+      reorderSuggestions,
+      totalMovementsRow,
+      locationStock,
+    ] = await Promise.all([
+      db.all(`
+        SELECT
+          TO_CHAR(sl.timestamp::date, 'MM/DD') AS date,
+          sl.timestamp::date AS full_date,
+          COUNT(*)::INT AS movements,
+          COALESCE(SUM(ABS(sl.quantity)),0)::INT AS total_quantity
+        FROM Stock_Ledger sl
+        WHERE sl.product_id IS NOT NULL
+          AND sl.timestamp >= NOW() - INTERVAL '30 days'
+        GROUP BY sl.timestamp::date
+        ORDER BY sl.timestamp::date ASC
+      `),
+      db.all(`
+        SELECT
+          p.category,
+          COUNT(DISTINCT p.id)::INT AS product_count,
+          COALESCE(SUM(sq.quantity),0)::INT AS total_stock
+        FROM Products p
+        LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
+        GROUP BY p.category
+        ORDER BY total_stock DESC
+        LIMIT 8
+      `),
+      db.all(`
+        SELECT
+          p.id, p.name, p.sku, p.category, p.unit_of_measure, p.reorder_minimum,
+          COALESCE(SUM(sq.quantity),0)::INT AS total_stock
+        FROM Products p
+        LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
+        GROUP BY p.id, p.name, p.sku, p.category, p.unit_of_measure, p.reorder_minimum
+        ORDER BY total_stock DESC
+        LIMIT 10
+      `),
+      db.all(`
+        SELECT
+          type,
+          COUNT(*)::INT AS total,
+          COUNT(*) FILTER (WHERE status='Done')::INT AS done_count
+        FROM Operations
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY type
+        ORDER BY total DESC
+      `),
+      db.all(`
+        SELECT
+          p.id, p.name, p.sku, p.category, p.reorder_minimum,
+          COALESCE(SUM(sq.quantity),0)::INT AS current_stock
+        FROM Products p
+        LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
+        WHERE p.reorder_minimum > 0
+        GROUP BY p.id, p.name, p.sku, p.category, p.reorder_minimum
+        HAVING COALESCE(SUM(sq.quantity),0) <= p.reorder_minimum
+        ORDER BY COALESCE(SUM(sq.quantity),0) ASC, p.name ASC
+        LIMIT 15
+      `),
+      db.get(`SELECT COUNT(*)::INT AS count FROM Stock_Ledger WHERE product_id IS NOT NULL`),
+      db.all(`
+        SELECT
+          l.name AS location_name,
+          l.type AS location_type,
+          COUNT(DISTINCT sq.product_id)::INT AS product_count,
+          COALESCE(SUM(sq.quantity),0)::INT AS total_stock
+        FROM Locations l
+        LEFT JOIN Stock_Quants sq ON sq.location_id = l.id
+        WHERE l.type = 'Internal'
+        GROUP BY l.id, l.name, l.type
+        HAVING COALESCE(SUM(sq.quantity),0) > 0
+        ORDER BY total_stock DESC
+        LIMIT 8
+      `),
+    ])
+
+    return res.json({
+      dailyMovements: dailyMovements || [],
+      categoryBreakdown: categoryBreakdown || [],
+      topProducts: topProducts || [],
+      operationStats: operationStats || [],
+      reorderSuggestions: reorderSuggestions || [],
+      locationStock: locationStock || [],
+      totalMovements: Number(totalMovementsRow?.count || 0),
+    })
+  } catch (error) {
+    console.error('Analytics error:', error)
+    return res.status(500).json({ message: 'Failed to load analytics' })
+  }
+})
+
+app.get('/api/export/products', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb()
+    const products = await db.all(`
+      SELECT
+        p.id, p.name, p.sku, p.category, p.unit_of_measure, p.reorder_minimum,
+        COALESCE(SUM(sq.quantity),0)::INT AS available_stock
+      FROM Products p
+      LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
+      GROUP BY p.id, p.name, p.sku, p.category, p.unit_of_measure, p.reorder_minimum
+      ORDER BY p.name ASC
+    `)
+
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const hdrs = ['ID', 'Name', 'SKU', 'Category', 'Unit of Measure', 'Reorder Minimum', 'Available Stock', 'Status']
+    const rows = products.map((p) => [
+      p.id,
+      p.name,
+      p.sku,
+      p.category,
+      p.unit_of_measure,
+      p.reorder_minimum,
+      p.available_stock,
+      Number(p.available_stock) <= Number(p.reorder_minimum) ? 'Low Stock' : 'In Stock',
+    ])
+
+    const csv = [hdrs, ...rows].map((r) => r.map(esc).join(',')).join('\r\n')
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename="core_inventory_products.csv"')
+    return res.send('\uFEFF' + csv)
+  } catch {
+    return res.status(500).json({ message: 'Products export failed' })
+  }
+})
+
+app.get('/api/export/ledger', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb()
+    const entries = await db.all(`
       SELECT
         sl.id,
-        sl.timestamp,
-        p.name AS product_name,
-        src.name AS from_location_name,
-        dst.name AS to_location_name,
+        TO_CHAR(sl.timestamp,'YYYY-MM-DD HH24:MI:SS') AS timestamp,
+        COALESCE(p.name, '') AS product_name,
+        COALESCE(p.sku, '') AS sku,
+        COALESCE(src.name, '') AS from_location,
+        COALESCE(dst.name, '') AS to_location,
         sl.quantity,
-        o.reference_number,
-        sl.note
+        COALESCE(o.reference_number, '') AS reference_number,
+        COALESCE(o.type, '') AS operation_type,
+        COALESCE(sl.note, '') AS note
       FROM Stock_Ledger sl
       LEFT JOIN Products p ON p.id = sl.product_id
       LEFT JOIN Locations src ON src.id = sl.from_location_id
       LEFT JOIN Locations dst ON dst.id = sl.to_location_id
       LEFT JOIN Operations o ON o.id = sl.operation_id
-      ORDER BY sl.timestamp DESC, sl.id DESC
-    `,
-  )
+      ORDER BY sl.timestamp DESC
+      LIMIT 10000
+    `)
 
-  res.json(rows)
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const hdrs = ['ID', 'Timestamp', 'Product', 'SKU', 'From Location', 'To Location', 'Quantity', 'Reference', 'Type', 'Note']
+    const rows = entries.map((e) => [
+      e.id,
+      e.timestamp,
+      e.product_name,
+      e.sku,
+      e.from_location,
+      e.to_location,
+      e.quantity,
+      e.reference_number,
+      e.operation_type,
+      e.note,
+    ])
+
+    const csv = [hdrs, ...rows].map((r) => r.map(esc).join(',')).join('\r\n')
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename="core_inventory_ledger.csv"')
+    return res.send('\uFEFF' + csv)
+  } catch {
+    return res.status(500).json({ message: 'Ledger export failed' })
+  }
 })
 
 const frontendDistPath = process.env.FRONTEND_DIST_PATH

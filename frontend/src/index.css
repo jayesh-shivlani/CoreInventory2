@@ -1773,3 +1773,215 @@ a { text-decoration: none; color: inherit; }
   .product-filter-actions { flex-direction: column; align-items: stretch; }
   .auth-reset-actions { flex-direction: column; }
 }
+
+.reports-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.reports-header {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.reports-export-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rep-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.rep-kpi {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.rep-kpi-val {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  margin-bottom: 5px;
+}
+
+.rep-kpi-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.rep-kpi.rep-kpi-warn .rep-kpi-val {
+  color: var(--warning);
+}
+
+.rep-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.rep-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.rep-card-wide { grid-column: 1 / -1; }
+.rep-card-alert { border-left: 4px solid var(--warning); }
+
+.rep-card-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: #fafafa;
+}
+
+.rep-card-hd h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rep-card-body {
+  padding: 16px 20px;
+}
+
+.chart-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 28px 16px;
+  font-size: 13px;
+}
+
+.hbars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hbar-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 56px;
+  align-items: center;
+  gap: 10px;
+}
+
+.hbar-label {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hbar-track {
+  height: 8px;
+  background: var(--body-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.hbar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.35s ease;
+}
+
+.hbar-val {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+}
+
+.ops-stat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ops-stat-item {
+  display: grid;
+  grid-template-columns: 88px 1fr 84px;
+  align-items: center;
+  gap: 10px;
+}
+
+.ops-stat-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.ops-stat-track {
+  height: 10px;
+  background: var(--body-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.ops-stat-fill {
+  height: 100%;
+  border-radius: 4px;
+  opacity: 0.75;
+  transition: width 0.35s ease;
+}
+
+.ops-stat-val {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.ledger-filter-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 12px 20px 16px;
+  align-items: end;
+}
+
+@media (max-width: 900px) {
+  .rep-kpi-grid { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+  .rep-grid { grid-template-columns: 1fr; }
+  .rep-card-wide { grid-column: 1 / -1; }
+  .ledger-filter-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 680px) {
+  .rep-kpi-grid { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
+  .ledger-filter-grid { grid-template-columns: 1fr; }
+  .hbar-row { grid-template-columns: 80px 1fr 44px; }
+}

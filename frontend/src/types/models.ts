@@ -50,6 +50,7 @@ export type LedgerEntry = {
   to_location_name?: string
   quantity: number
   reference_number?: string
+  operation_type?: string
   note?: string
 }
 
@@ -131,4 +132,55 @@ export type ProductStockRow = {
   location_id: number
   location_name: string
   quantity: number
+}
+
+export type WarehouseInventoryRow = {
+  product_id: number
+  product_name: string
+  sku: string
+  unit_of_measure: string
+  quantity: number
+}
+
+export type AnalyticsOverview = {
+  dailyMovements: Array<{
+    date: string
+    full_date: string
+    movements: number
+    total_quantity: number
+  }>
+  categoryBreakdown: Array<{
+    category: string
+    product_count: number
+    total_stock: number
+  }>
+  topProducts: Array<{
+    id: number
+    name: string
+    sku: string
+    category: string
+    unit_of_measure: string
+    reorder_minimum: number
+    total_stock: number
+  }>
+  operationStats: Array<{
+    type: string
+    total: number
+    done_count: number
+  }>
+  reorderSuggestions: Array<{
+    id: number
+    name: string
+    sku: string
+    category: string
+    reorder_minimum: number
+    current_stock: number
+  }>
+  locationStock: Array<{
+    location_name: string
+    location_type: string
+    product_count: number
+    total_stock: number
+  }>
+  totalMovements: number
 }

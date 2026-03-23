@@ -10,6 +10,7 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { AUTH_INVALID_EVENT, DEFAULT_CATEGORIES, DEFAULT_UOMS, LIVE_SYNC_INTERVAL_MS, TOKEN_KEY } from './config/constants'
+import ReportsPage, { downloadCSV } from './ReportsPage'
 import {
   apiRequest,
   formatDate,
@@ -33,6 +34,7 @@ import type {
   UserProfile,
   UserRoleRequestStatus,
   Warehouse,
+  WarehouseInventoryRow,
 } from './types/models'
 
 function App() {
@@ -138,6 +140,10 @@ function App() {
           <Route
             path="/move-history"
             element={<MoveHistoryPage token={token} pushToast={pushToast} />}
+          />
+          <Route
+            path="/reports"
+            element={<ReportsPage token={token} pushToast={pushToast} />}
           />
           <Route
             path="/settings/warehouses"
@@ -277,6 +283,10 @@ function ProtectedLayout({
             <NavLink to="/move-history">
               <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="14 2 14 8 20 8" /><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9.34" /><polygon points="18 2 22 6 12 16 8 16 8 12 18 2" /></svg>
               Move History
+            </NavLink>
+            <NavLink to="/reports">
+              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
+              Reports
             </NavLink>
           </div>
           <div className="sidebar-nav-section">
@@ -1353,11 +1363,20 @@ function ProductsPage({
                 <h2>Products</h2>
                 <p>Manage catalog items, monitor stock, and keep reorder levels in control.</p>
               </div>
-              {canManageProducts ? (
-                <button type="button" className="btn btn-primary" onClick={startNew}>+ New Product</button>
-              ) : (
-                <div className="muted">Read-only access. Contact admin to manage products.</div>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {canManageProducts ? (
+                  <button type="button" className="btn btn-primary" onClick={startNew}>+ New Product</button>
+                ) : (
+                  <div className="muted">Read-only access. Contact admin to manage products.</div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => void downloadCSV('/export/products', 'core_inventory_products.csv', token, pushToast)}
+                >
+                  Export CSV
+                </button>
+              </div>
             </div>
             <div className="product-stats-grid">
               <article className="product-stat-card">
@@ -1725,11 +1744,25 @@ function OperationsPage({
       return
     }
 
+    if ((operationType === 'Delivery' || operationType === 'Internal') && sourceLocation.trim() && destinationLocation.trim() && sourceLocation.trim().toLowerCase() === destinationLocation.trim().toLowerCase()) {
+      pushToast('error', 'Source and destination locations must be different')
+      return
+    }
+
+    const seenProducts = new Set<number>()
+
     for (const line of lines) {
       if (!line.product_id) {
         pushToast('error', 'Select a product for every line')
         return
       }
+
+      const productId = Number(line.product_id)
+      if (seenProducts.has(productId)) {
+        pushToast('error', 'Each product should appear only once per operation document')
+        return
+      }
+      seenProducts.add(productId)
 
       const requested = Number(line.requested_quantity)
       if (Number.isNaN(requested) || requested < 0) {
@@ -1760,6 +1793,10 @@ function OperationsPage({
     }
     if (requiresSource && !sourceLocation.trim()) {
       pushToast('error', 'Source location is required')
+      return
+    }
+    if (operationType === 'Delivery' && !destinationLocation.trim()) {
+      pushToast('error', 'Destination location is required for deliveries')
       return
     }
     if (requiresDestination && !destinationLocation.trim()) {
@@ -1843,8 +1880,24 @@ function OperationsPage({
   }
 
   const updateOperationStatus = async (operationId: number, status: 'Draft' | 'Waiting' | 'Ready' | 'Canceled') => {
+    let note: string | undefined
+    if (status === 'Canceled') {
+      const input = window.prompt('Please enter cancellation reason (required):')
+      if (input === null) return
+      const trimmed = input.trim()
+      if (!trimmed) {
+        pushToast('error', 'Cancellation reason is required')
+        return
+      }
+      if (trimmed.length > 500) {
+        pushToast('error', 'Cancellation reason must be 500 characters or fewer')
+        return
+      }
+      note = trimmed
+    }
+
     try {
-      await apiRequest(`/operations/${operationId}/status`, 'POST', token ?? undefined, { status })
+      await apiRequest(`/operations/${operationId}/status`, 'POST', token ?? undefined, { status, note })
       pushToast('success', `Status changed to ${status}`)
       await fetchData()
     } catch (error) {
@@ -2185,31 +2238,62 @@ function MoveHistoryPage({
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+
+  const activeFilters = [search.trim(), dateFrom, dateTo, typeFilter].filter(Boolean).length
+
+  const buildQuery = useCallback(() => {
+    const p = new URLSearchParams()
+    if (search.trim()) p.set('search', search.trim())
+    if (dateFrom) p.set('dateFrom', dateFrom)
+    if (dateTo) p.set('dateTo', dateTo)
+    if (typeFilter) p.set('type', typeFilter)
+    return p.toString() ? `?${p.toString()}` : ''
+  }, [search, dateFrom, dateTo, typeFilter])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await apiRequest<LedgerEntry[]>(`/ledger${buildQuery()}`, 'GET', token ?? undefined)
+      setEntries(Array.isArray(data) ? data : [])
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [buildQuery, token, pushToast])
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true)
-      try {
-        const data = await apiRequest<LedgerEntry[]>('/ledger', 'GET', token ?? undefined)
-        setEntries(Array.isArray(data) ? data : [])
-      } catch (error) {
-        pushToast('error', (error as Error).message)
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
+    void load()
+  }, [load])
 
-    const timer = setInterval(() => {
-      load()
-    }, LIVE_SYNC_INTERVAL_MS)
-
+  useEffect(() => {
+    const timer = setInterval(load, LIVE_SYNC_INTERVAL_MS)
     return () => clearInterval(timer)
-  }, [token, pushToast])
+  }, [load])
+
+  const clearFilters = () => {
+    setSearch('')
+    setDateFrom('')
+    setDateTo('')
+    setTypeFilter('')
+  }
+
+  const handleExport = () => {
+    void downloadCSV(
+      '/export/ledger',
+      'core_inventory_ledger.csv',
+      token,
+      pushToast,
+    )
+  }
 
   const movementCount = entries.length
   const movedQuantity = useMemo(
-    () => entries.reduce((sum, entry) => sum + safeNumber(entry.quantity), 0),
+    () => entries.reduce((sum, e) => sum + safeNumber(e.quantity), 0),
     [entries],
   )
   const ledgerRefreshing = loading && entries.length > 0
@@ -2222,6 +2306,9 @@ function MoveHistoryPage({
             <h2>Move History</h2>
             <p>Chronological stock ledger for every validated movement.</p>
           </div>
+          <button type="button" className="btn btn-secondary" onClick={handleExport}>
+            Export CSV
+          </button>
         </div>
         <div
           className="product-stats-grid warehouses-stats-grid"
@@ -2232,9 +2319,71 @@ function MoveHistoryPage({
             <div className="product-stat-value">{movementCount}</div>
           </article>
           <article className="product-stat-card">
-            <div className="product-stat-label">Moved Quantity</div>
-            <div className="product-stat-value">{movedQuantity}</div>
+            <div className="product-stat-label">Units Moved</div>
+            <div className="product-stat-value">{movedQuantity.toLocaleString()}</div>
           </article>
+          <article className="product-stat-card">
+            <div className="product-stat-label">Active Filters</div>
+            <div className="product-stat-value">{activeFilters}</div>
+          </article>
+          <article className="product-stat-card">
+            <div className="product-stat-label">Showing (max 1 000)</div>
+            <div className="product-stat-value">{entries.length}</div>
+          </article>
+        </div>
+      </div>
+
+      <div className="list-card">
+        <div className="list-header">
+          <h2>Filter Movements</h2>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={clearFilters}
+            disabled={activeFilters === 0}
+          >
+            Reset
+          </button>
+        </div>
+        <div className="ledger-filter-grid">
+          <div className="filter-group">
+            <label className="filter-label">Search product / reference</label>
+            <input
+              className="search-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="e.g. Steel Rods or RCV-000012"
+              style={{ minHeight: 36 }}
+            />
+          </div>
+          <div className="filter-group">
+            <label className="filter-label">Operation type</label>
+            <select className="form-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="">All types</option>
+              <option value="Receipt">Receipt</option>
+              <option value="Delivery">Delivery</option>
+              <option value="Internal">Internal Transfer</option>
+              <option value="Adjustment">Adjustment</option>
+            </select>
+          </div>
+          <div className="filter-group">
+            <label className="filter-label">From date</label>
+            <input
+              className="form-input"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </div>
+          <div className="filter-group">
+            <label className="filter-label">To date</label>
+            <input
+              className="form-input"
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
@@ -2242,7 +2391,7 @@ function MoveHistoryPage({
         <div className="list-header">
           <h2>Stock Ledger</h2>
           <div className="list-header-meta">
-            <p className="muted">Auto-refreshed every few seconds.</p>
+            <p className="muted">Auto-refreshed every few seconds. Max 1 000 rows.</p>
             <SyncStatusChip show={ledgerRefreshing} />
           </div>
         </div>
@@ -2252,6 +2401,7 @@ function MoveHistoryPage({
               <tr>
                 <th>Date &amp; Time</th>
                 <th>Product</th>
+                <th>Type</th>
                 <th>From</th>
                 <th>To</th>
                 <th>Quantity</th>
@@ -2260,17 +2410,44 @@ function MoveHistoryPage({
               </tr>
             </thead>
             <tbody>
-              {loading && entries.length === 0 && <tr className="empty-row"><td colSpan={7}>Loading ledger…</td></tr>}
-              {!loading && entries.length === 0 && <tr className="empty-row"><td colSpan={7}>No stock movements have been recorded yet.</td></tr>}
+              {loading && entries.length === 0 && (
+                <tr className="empty-row"><td colSpan={8}>Loading ledger...</td></tr>
+              )}
+              {!loading && entries.length === 0 && (
+                <tr className="empty-row">
+                  <td colSpan={8}>
+                    {activeFilters > 0
+                      ? 'No entries match the current filters.'
+                      : 'No stock movements have been recorded yet.'}
+                  </td>
+                </tr>
+              )}
               {entries.map((entry) => (
                 <tr key={entry.id}>
-                  <td>{formatDate(entry.timestamp)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{formatDate(entry.timestamp)}</td>
                   <td><strong>{entry.product_name}</strong></td>
-                  <td>{entry.from_location_name ?? '—'}</td>
-                  <td>{entry.to_location_name ?? '—'}</td>
-                  <td>{entry.quantity}</td>
-                  <td>{entry.reference_number ?? '—'}</td>
-                  <td><span className="muted" style={{ fontSize: '12px' }}>{entry.note ?? '—'}</span></td>
+                  <td>
+                    {entry.operation_type ? (
+                      <span className={`badge badge-${
+                        entry.operation_type === 'Receipt'
+                          ? 'done'
+                          : entry.operation_type === 'Delivery'
+                            ? 'canceled'
+                            : entry.operation_type === 'Internal'
+                              ? 'ready'
+                              : 'waiting'
+                      }`}>
+                        {entry.operation_type}
+                      </span>
+                    ) : (
+                      <span className="muted">-</span>
+                    )}
+                  </td>
+                  <td>{entry.from_location_name ?? '-'}</td>
+                  <td>{entry.to_location_name ?? '-'}</td>
+                  <td><strong>{entry.quantity}</strong></td>
+                  <td>{entry.reference_number ?? '-'}</td>
+                  <td><span className="muted" style={{ fontSize: '12px' }}>{entry.note ?? '-'}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -2294,6 +2471,9 @@ function WarehousesPage({
   const [name, setName] = useState('')
   const [type, setType] = useState('Internal')
   const [loading, setLoading] = useState(true)
+  const [expandedLocationId, setExpandedLocationId] = useState<number | null>(null)
+  const [inventoryLoadingId, setInventoryLoadingId] = useState<number | null>(null)
+  const [locationInventory, setLocationInventory] = useState<Record<number, WarehouseInventoryRow[]>>({})
   const canManageLocations = hasElevatedAccess(currentUser)
 
   const load = useCallback(async () => {
@@ -2362,6 +2542,83 @@ function WarehousesPage({
   const vendorCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'vendor').length
   const customerCount = warehouses.filter((wh) => String(wh.type).trim().toLowerCase() === 'customer').length
   const warehousesRefreshing = loading && warehouses.length > 0
+
+  const toggleWarehouseInventory = async (warehouseId: number) => {
+    if (expandedLocationId === warehouseId) {
+      setExpandedLocationId(null)
+      return
+    }
+
+    setExpandedLocationId(warehouseId)
+    if (locationInventory[warehouseId]) return
+
+    setInventoryLoadingId(warehouseId)
+    try {
+      const rows = await apiRequest<WarehouseInventoryRow[]>(`/locations/${warehouseId}/inventory`, 'GET', token ?? undefined)
+      setLocationInventory((prev) => ({
+        ...prev,
+        [warehouseId]: Array.isArray(rows) ? rows : [],
+      }))
+    } catch (error) {
+      pushToast('error', (error as Error).message)
+      setExpandedLocationId(null)
+    } finally {
+      setInventoryLoadingId(null)
+    }
+  }
+
+  const exportWarehouseInventoryCsv = async (warehouse: Warehouse) => {
+    let rows = locationInventory[warehouse.id] || []
+
+    if (!rows.length) {
+      setInventoryLoadingId(warehouse.id)
+      try {
+        const fetched = await apiRequest<WarehouseInventoryRow[]>(`/locations/${warehouse.id}/inventory`, 'GET', token ?? undefined)
+        rows = Array.isArray(fetched) ? fetched : []
+        setLocationInventory((prev) => ({
+          ...prev,
+          [warehouse.id]: rows,
+        }))
+      } catch (error) {
+        pushToast('error', (error as Error).message)
+        return
+      } finally {
+        setInventoryLoadingId(null)
+      }
+    }
+
+    if (!rows.length) {
+      pushToast('info', `No stock to export for ${warehouse.name}`)
+      return
+    }
+
+    const header = ['Warehouse', 'Product', 'SKU', 'Quantity', 'UoM']
+    const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`
+    const lines = [
+      header.join(','),
+      ...rows.map((row) => [
+        escape(warehouse.name),
+        escape(row.product_name),
+        escape(row.sku),
+        escape(safeNumber(row.quantity)),
+        escape(row.unit_of_measure),
+      ].join(',')),
+    ]
+
+    const csv = lines.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const stamp = new Date().toISOString().slice(0, 10)
+    const safeName = warehouse.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'location'
+    link.href = url
+    link.download = `warehouse-stock-${safeName}-${stamp}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    pushToast('success', `Exported stock CSV for ${warehouse.name}`)
+  }
 
   return (
     <section className="warehouses-page">
@@ -2432,26 +2689,82 @@ function WarehousesPage({
                 <tr>
                   <th>Name</th>
                   <th>Type</th>
+                  <th>Inventory</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={3}>Loading…</td></tr>}
-                {!loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={3}>No locations configured yet.</td></tr>}
+                {loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={4}>Loading…</td></tr>}
+                {!loading && warehouses.length === 0 && <tr className="empty-row"><td colSpan={4}>No locations configured yet.</td></tr>}
                 {warehouses.map((wh) => (
-                  <tr key={wh.id}>
-                    <td><strong>{wh.name}</strong></td>
-                    <td><span className="badge badge-draft">{wh.type}</span></td>
-                    <td>
-                      {canManageLocations ? (
-                        <button type="button" className="btn-icon" onClick={() => deleteWarehouse(wh.id)} title="Delete location">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                        </button>
-                      ) : (
-                        <span className="muted">Contact admin</span>
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={wh.id}>
+                    <tr>
+                      <td><strong>{wh.name}</strong></td>
+                      <td><span className="badge badge-draft">{wh.type}</span></td>
+                      <td>
+                        <div className="operation-row-actions">
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => { void toggleWarehouseInventory(wh.id) }}
+                          >
+                            {expandedLocationId === wh.id ? 'Hide Stock' : 'View Stock'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => { void exportWarehouseInventoryCsv(wh) }}
+                            disabled={inventoryLoadingId === wh.id}
+                          >
+                            {inventoryLoadingId === wh.id ? 'Preparing…' : 'Export CSV'}
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        {canManageLocations ? (
+                          <button type="button" className="btn-icon" onClick={() => deleteWarehouse(wh.id)} title="Delete location">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                          </button>
+                        ) : (
+                          <span className="muted">Contact admin</span>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedLocationId === wh.id && (
+                      <tr>
+                        <td colSpan={4}>
+                          {inventoryLoadingId === wh.id ? (
+                            <p className="muted">Loading stock details…</p>
+                          ) : (locationInventory[wh.id] || []).length === 0 ? (
+                            <p className="muted">No products currently stocked in this location.</p>
+                          ) : (
+                            <div className="data-table-wrap">
+                              <table className="data-table">
+                                <thead>
+                                  <tr>
+                                    <th>Product</th>
+                                    <th>SKU</th>
+                                    <th>Quantity</th>
+                                    <th>UoM</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(locationInventory[wh.id] || []).map((row) => (
+                                    <tr key={`${wh.id}-${row.product_id}`}>
+                                      <td><strong>{row.product_name}</strong></td>
+                                      <td>{row.sku}</td>
+                                      <td>{safeNumber(row.quantity)}</td>
+                                      <td>{row.unit_of_measure}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
