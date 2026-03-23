@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { useConfirm } from '../components/ConfirmModal'
+import { useConfirm } from '../hooks/useConfirm'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { hasElevatedAccess } from '../utils/authHelpers'
 import { apiRequest, formatDate, toOperationKind } from '../utils/helpers'

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { isAdminRole } from '../utils/authHelpers'
 import { apiRequest } from '../utils/helpers'
-import { useConfirm } from '../components/ConfirmModal'
+import { useConfirm } from '../hooks/useConfirm'
 import type { AdminManagedUser, AdminRoleRequest, Toast, UserProfile, UserRoleRequestStatus } from '../types/models'
 
 type Props = {

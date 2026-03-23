@@ -15,8 +15,9 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { AUTH_INVALID_EVENT, DEFAULT_CATEGORIES, DEFAULT_UOMS, LIVE_SYNC_INTERVAL_MS, TOKEN_KEY } from './config/constants'
-import ReportsPage, { downloadCSV } from './ReportsPage'
-import { useConfirm } from './components/ConfirmModal'
+import ReportsPage from './ReportsPage'
+import { useConfirm } from './hooks/useConfirm'
+import { downloadCSV } from './utils/reports'
 import {
   apiRequest,
   formatDate,

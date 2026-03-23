@@ -4,8 +4,9 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { API_BASE, LIVE_SYNC_INTERVAL_MS } from './config/constants'
+import { LIVE_SYNC_INTERVAL_MS } from './config/constants'
 import { apiRequest } from './utils/helpers'
+import { downloadCSV } from './utils/reports'
 import type { AnalyticsOverview, Toast } from './types/models'
 
 type HoverState = {
@@ -13,33 +14,6 @@ type HoverState = {
   y: number
   label: string
   value: string
-}
-
-export async function downloadCSV(
-  path: string,
-  filename: string,
-  token: string | null,
-  pushToast: (kind: Toast['kind'], text: string) => void,
-) {
-  try {
-    const resp = await fetch(`${API_BASE}${path}`, {
-      headers: { Authorization: token ? `Bearer ${token}` : '' },
-    })
-    if (!resp.ok) throw new Error('Export failed')
-    const blob = await resp.blob()
-    // Trigger a browser download without navigating away from the current page.
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    pushToast('success', `${filename} downloaded`)
-  } catch {
-    pushToast('error', 'Export failed - please try again.')
-  }
 }
 
 function BarChart({
@@ -51,8 +25,8 @@ function BarChart({
   color?: string
   emptyMsg?: string
 }) {
-  if (!data.length) return <div className="chart-empty">{emptyMsg}</div>
   const [hover, setHover] = useState<HoverState | null>(null)
+  if (!data.length) return <div className="chart-empty">{emptyMsg}</div>
 
   const maxVal = Math.max(...data.map((d) => d.value), 1)
   const W = 680
@@ -155,8 +129,8 @@ function HBars({
   data: Array<{ label: string; value: number }>
   color?: string
 }) {
-  if (!data.length) return <div className="chart-empty">No category data.</div>
   const [active, setActive] = useState<number | null>(null)
+  if (!data.length) return <div className="chart-empty">No category data.</div>
   const maxVal = Math.max(...data.map((d) => d.value), 1)
 
   return (

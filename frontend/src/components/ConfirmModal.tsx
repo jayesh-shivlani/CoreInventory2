@@ -1,16 +1,6 @@
 /**
  * ConfirmModal - replaces every window.confirm() call in the app.
- *
- * Usage:
- *   const { modal, confirm } = useConfirm()
- *   ...
- *   const ok = await confirm('Delete this product?', 'This cannot be undone.')
- *   if (ok) { ... }
- *   ...
- *   return <>{modal}</>
  */
-
-import { useCallback, useRef, useState } from 'react'
 
 interface ModalState {
   open:    boolean
@@ -23,6 +13,7 @@ interface ConfirmModalProps extends ModalState {
   onConfirm: () => void
   onCancel:  () => void
 }
+
 
 function ConfirmModal({ open, title, body, danger, onConfirm, onCancel }: ConfirmModalProps) {
   if (!open) return null
@@ -39,7 +30,6 @@ function ConfirmModal({ open, title, body, danger, onConfirm, onCancel }: Confir
             type="button"
             className={danger ? 'btn btn-danger' : 'btn btn-primary'}
             onClick={onConfirm}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
           >
             Confirm
@@ -48,49 +38,6 @@ function ConfirmModal({ open, title, body, danger, onConfirm, onCancel }: Confir
       </div>
     </div>
   )
-}
-
-/**
- * Returns `{ modal, confirm }`.
- *
- * - `modal`   - JSX to render (place once at the root of your component).
- * - `confirm` - async function that resolves to `true` / `false`.
- */
-export function useConfirm() {
-  const [state, setState] = useState<ModalState>({
-    open: false, title: '', body: '',
-  })
-  const resolverRef = useRef<((value: boolean) => void) | null>(null)
-
-  const confirm = useCallback(
-    (title: string, body = '', danger = true): Promise<boolean> => {
-      setState({ open: true, title, body, danger })
-      return new Promise<boolean>((resolve) => {
-        resolverRef.current = resolve
-      })
-    },
-    [],
-  )
-
-  const handleConfirm = useCallback(() => {
-    setState((s) => ({ ...s, open: false }))
-    resolverRef.current?.(true)
-  }, [])
-
-  const handleCancel = useCallback(() => {
-    setState((s) => ({ ...s, open: false }))
-    resolverRef.current?.(false)
-  }, [])
-
-  const modal = (
-    <ConfirmModal
-      {...state}
-      onConfirm={handleConfirm}
-      onCancel={handleCancel}
-    />
-  )
-
-  return { modal, confirm }
 }
 
 export default ConfirmModal
