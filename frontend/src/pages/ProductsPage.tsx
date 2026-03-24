@@ -101,7 +101,8 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const startEdit = (p: Product) => {
     if (!canManage) { pushToast('info', 'Only admin-approved roles can change products.'); return }
     setEditingProductId(p.id); setName(p.name); setSku(p.sku); setCategory(p.category)
-    setUom(p.unit_of_measure); setReorderMin(String(safeNumber(p.reorder_minimum))); setInitialStock('0')
+    setUom(/^units\s*units$/i.test(p.unit_of_measure.trim()) ? 'Units' : p.unit_of_measure)
+    setReorderMin(String(safeNumber(p.reorder_minimum))); setInitialStock('0')
     setViewMode('form')
   }
 
@@ -205,7 +206,13 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     [filterOptions.categories, category],
   )
   const uomOptions = useMemo(
-    () => Array.from(new Set([...DEFAULT_UOMS, ...filterOptions.uoms, uom].filter(Boolean))),
+    () => Array.from(
+      new Set(
+        [...DEFAULT_UOMS, ...filterOptions.uoms, uom]
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0 && !/^units\s*units$/i.test(value)),
+      ),
+    ),
     [filterOptions.uoms, uom],
   )
 
