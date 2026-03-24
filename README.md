@@ -11,6 +11,8 @@ A full-stack inventory management system for product cataloging, warehouse stock
 - Node.js + Express backend API
 - PostgreSQL database via Supabase
 - OTP-supported authentication and role-aware user model
+- Lazy-loaded frontend routes with shared polling/search utilities
+- Indexed backend read paths for dashboards, operations, and ledger views
 - Render-ready deployment configuration
 
 ## Features
@@ -25,8 +27,11 @@ A full-stack inventory management system for product cataloging, warehouse stock
 	- Admin can approve, reject, revoke roles, and delete users
 	- Role-action audit log
 - **Notifications**
-	- Real-time in-app notification bell (polls every 8 s)
+	- Real-time in-app notification bell with visibility-aware background syncing
 	- Role-filtered: low-stock alerts, pending approvals, operation status
+- **Global productivity**
+	- Command search in the top bar for products, operations, locations, and quick actions
+	- Debounced search/filter flows to keep large lists responsive
 - **Inventory visibility**
 	- KPI dashboard with filters and contextual icons
 	- Product list with stock levels and low-stock highlighting
@@ -169,6 +174,9 @@ Admin (Admin role required):
 Notifications:
 - `GET /api/notifications`
 
+Search:
+- `GET /api/search`
+
 ## Deployment
 
 - Render configuration is provided in `render.yaml`
@@ -180,8 +188,4 @@ Notifications:
 - Keep `EXPOSE_DEV_OTP=false` in production.
 - Configure `ALLOWED_ORIGINS` explicitly for your deployed frontend origin.
 - Do not commit `.env` files or secret-bearing files.
-
-## Demo Access
-
-- Email: `demo@coreinventory.app`
-- Password: `demo12345`
+- Share any judge/demo credentials privately through your deployment platform or a secure channel, not in the public repository.

@@ -7,35 +7,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest, formatDate, safeNumber } from '../utils/helpers'
 import SyncStatusChip from '../components/SyncStatusChip'
-import { API_BASE, LIVE_SYNC_INTERVAL_MS } from '../config/constants'
+import { LIVE_SYNC_INTERVAL_MS, SEARCH_DEBOUNCE_MS } from '../config/constants'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { useLivePolling } from '../hooks/useLivePolling'
+import { areLedgerEntriesEqual } from '../utils/stability'
 import type { LedgerEntry, Toast } from '../types/models'
+import { downloadFileFromApi } from '../utils/downloads'
 
 interface Props {
-  token:     string | null
+  token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
-}
-
-function downloadLedger(token: string | null, pushToast: Props['pushToast']) {
-  void (async () => {
-    try {
-      const resp = await fetch(`${API_BASE}/export/ledger`, {
-        headers: { Authorization: token ? `Bearer ${token}` : '' },
-      })
-      if (!resp.ok) throw new Error('Export failed')
-      const blob = await resp.blob()
-      const url  = URL.createObjectURL(blob)
-      const a    = document.createElement('a')
-      a.href = url
-      a.download = 'core_inventory_ledger.csv'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      pushToast('success', 'core_inventory_ledger.csv downloaded')
-    } catch {
-      pushToast('error', 'Export failed - please try again.')
-    }
-  })()
 }
 
 const TYPE_BADGE: Record<string, string> = {
@@ -55,6 +36,13 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS)
+  const locationSyncRef = useRef<{
+    search: string
+    dateFrom: string
+    dateTo: string
+    type: string
+  } | null>(null)
   const [sortBy, setSortBy] = useState<'date' | 'product' | 'type' | 'from' | 'to' | 'quantity' | 'reference'>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -64,6 +52,13 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
     const nextDateFrom = params.get('dateFrom') ?? ''
     const nextDateTo = params.get('dateTo') ?? ''
     const nextType = params.get('type') ?? ''
+
+    locationSyncRef.current = {
+      search: nextSearch,
+      dateFrom: nextDateFrom,
+      dateTo: nextDateTo,
+      type: nextType,
+    }
 
     setSearch((prev) => (prev === nextSearch ? prev : nextSearch))
     setDateFrom((prev) => (prev === nextDateFrom ? prev : nextDateFrom))
@@ -75,12 +70,12 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
 
   const buildQuery = useCallback(() => {
     const p = new URLSearchParams()
-    if (search.trim()) p.set('search',   search.trim())
+    if (debouncedSearch.trim()) p.set('search', debouncedSearch.trim())
     if (dateFrom)      p.set('dateFrom', dateFrom)
     if (dateTo)        p.set('dateTo',   dateTo)
     if (typeFilter)    p.set('type',     typeFilter)
     return p.toString() ? `?${p.toString()}` : ''
-  }, [search, dateFrom, dateTo, typeFilter])
+  }, [debouncedSearch, dateFrom, dateTo, typeFilter])
 
   const hasLoadedLedgerRef = useRef(false)
 
@@ -90,7 +85,8 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
     }
     try {
       const data = await apiRequest<LedgerEntry[]>(`/ledger${buildQuery()}`, 'GET', token ?? undefined)
-      setEntries(Array.isArray(data) ? data : [])
+      const nextEntries = Array.isArray(data) ? data : []
+      setEntries((previous) => (areLedgerEntriesEqual(previous, nextEntries) ? previous : nextEntries))
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
@@ -101,15 +97,40 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
     }
   }, [buildQuery, token, pushToast])
 
-  useEffect(() => { void load(true) }, [load])
   useEffect(() => {
-    const t = setInterval(() => { void load(false) }, LIVE_SYNC_INTERVAL_MS)
-    return () => clearInterval(t)
+    void load(!hasLoadedLedgerRef.current)
   }, [load])
 
+  useLivePolling(
+    async () => {
+      await load(false)
+    },
+    {
+      enabled: Boolean(token),
+      immediate: false,
+      intervalMs: LIVE_SYNC_INTERVAL_MS,
+    },
+  )
+
   useEffect(() => {
+    const pendingLocationSync = locationSyncRef.current
+    if (pendingLocationSync) {
+      const settled =
+        search === pendingLocationSync.search &&
+        debouncedSearch === pendingLocationSync.search &&
+        dateFrom === pendingLocationSync.dateFrom &&
+        dateTo === pendingLocationSync.dateTo &&
+        typeFilter === pendingLocationSync.type
+
+      if (!settled) {
+        return
+      }
+
+      locationSyncRef.current = null
+    }
+
     const params = new URLSearchParams()
-    if (search.trim()) params.set('search', search.trim())
+    if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim())
     if (dateFrom) params.set('dateFrom', dateFrom)
     if (dateTo) params.set('dateTo', dateTo)
     if (typeFilter) params.set('type', typeFilter)
@@ -119,7 +140,7 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
     if (next !== current) {
       navigate({ pathname: location.pathname, search: next ? `?${next}` : '' }, { replace: true })
     }
-  }, [search, dateFrom, dateTo, typeFilter, location.pathname, location.search, navigate])
+  }, [search, debouncedSearch, dateFrom, dateTo, typeFilter, location.pathname, location.search, navigate])
 
   const movedQty = useMemo(() => entries.reduce((s, e) => s + safeNumber(e.quantity), 0), [entries])
 
@@ -160,7 +181,7 @@ export default function MoveHistoryPage({ token, pushToast }: Props) {
             <h2>Move History</h2>
             <p>Chronological stock ledger for every validated movement.</p>
           </div>
-          <button type="button" className="btn btn-secondary" onClick={() => downloadLedger(token, pushToast)}>
+          <button type="button" className="btn btn-secondary" onClick={() => void downloadFileFromApi('/export/ledger', 'core_inventory_ledger.csv', token, pushToast)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" style={{ marginRight: 6 }}>
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>

@@ -355,6 +355,26 @@ async function initDb() {
     }
   }
 
+  // Read-heavy pages repeatedly filter and sort on these columns.
+  const indexStatements = [
+    'CREATE INDEX IF NOT EXISTS idx_products_name ON Products (name)',
+    'CREATE INDEX IF NOT EXISTS idx_products_sku ON Products (sku)',
+    'CREATE INDEX IF NOT EXISTS idx_products_category ON Products (category)',
+    'CREATE INDEX IF NOT EXISTS idx_stock_quants_product_id ON Stock_Quants (product_id)',
+    'CREATE INDEX IF NOT EXISTS idx_stock_quants_location_id ON Stock_Quants (location_id)',
+    'CREATE INDEX IF NOT EXISTS idx_operation_lines_operation_id ON Operation_Lines (operation_id)',
+    'CREATE INDEX IF NOT EXISTS idx_operations_type_status_created_at ON Operations (type, status, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_operations_status_created_at ON Operations (status, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_stock_ledger_timestamp ON Stock_Ledger (timestamp DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_stock_ledger_product_id ON Stock_Ledger (product_id)',
+    'CREATE INDEX IF NOT EXISTS idx_signup_verifications_email ON Signup_Verifications (email)',
+    'CREATE INDEX IF NOT EXISTS idx_signup_verifications_status_created_at ON Signup_Verifications (status, created_at DESC)',
+  ]
+
+  for (const sql of indexStatements) {
+    await db.exec(sql)
+  }
+
   // Demo seed user
   const userCount = await db.get('SELECT COUNT(*) AS count FROM Users')
   if (!userCount || Number(userCount.count) === 0) {

@@ -3,6 +3,7 @@
  * Displays labeled numeric metrics with optional icon and variant styling.
  */
 
+import { memo } from 'react'
 import type { ReactNode } from 'react'
 
 const KPI_ICONS: Record<string, ReactNode> = {
@@ -55,7 +56,7 @@ interface KpiCardProps {
   onClick?: () => void
 }
 
-export default function KpiCard({ label, value, variant, icon, onClick }: KpiCardProps) {
+function KpiCard({ label, value, variant, icon, onClick }: KpiCardProps) {
   const className = [
     'kpi-card',
     onClick ? 'kpi-card-clickable' : '',
@@ -88,3 +89,5 @@ export default function KpiCard({ label, value, variant, icon, onClick }: KpiCar
     </article>
   )
 }
+
+export default memo(KpiCard)

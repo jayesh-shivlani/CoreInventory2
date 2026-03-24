@@ -19,6 +19,7 @@ React + TypeScript frontend for Core Inventory IMS.
 - Warehouse/location settings
 - User profile and session handling
 - Notifications bell (role-aware alerts, dismiss, clear-all)
+- Global command search for products, operations, locations, and quick actions
 - Admin tools (approve/reject role requests, revoke roles, delete users)
 - Role-action audit history
 
@@ -36,11 +37,19 @@ React + TypeScript frontend for Core Inventory IMS.
 frontend/
 |- src/
 |  |- App.tsx                # main routed UI shell and pages
+|  |- components/
+|  |  |- layout/             # app shell and top-bar search
+|  |  `- PageLoadingState.tsx
 |  |- main.tsx               # React bootstrap
 |  |- index.css              # global styles
 |  |- config/
 |  |  `- constants.ts        # app-wide constants and env-derived values
+|  |- hooks/
+|  |  |- useDebouncedValue.ts
+|  |  `- useLivePolling.ts
+|  |- pages/                 # route-level screens
 |  |- utils/
+|  |  |- downloads.ts        # authenticated file downloads
 |  |  `- helpers.ts          # API client + formatting helpers
 |  `- types/
 |     `- models.ts           # shared TypeScript models
@@ -97,7 +106,8 @@ Build output directory: `dist/`
 ## Notes
 
 - Auth token key in local storage: `ims-auth-token`
-- UI development mode includes helper behavior for faster testing workflows
+- Top-bar search supports `/` as a keyboard shortcut
+- Route-level lazy loading keeps the initial bundle smaller and faster to load
 
 ## Production Notes
 

@@ -27,6 +27,7 @@ const dashboardRouter     = require('./routes/dashboard')
 const notificationsRouter = require('./routes/notifications')
 const analyticsRouter     = require('./routes/analytics')
 const adminRouter         = require('./routes/admin')
+const searchRouter        = require('./routes/search')
 
 const app = express()
 
@@ -83,14 +84,21 @@ app.get('/api/health', async (req, res) => {
   const { getDb } = require('./db')
   const db         = await getDb()
   const row        = await db.get("SELECT NOW() AS now")
-  const emailState = getEmailProviderState()
-  res.json({
+  const response = {
     status:          'ok',
     databaseTime:    row.now,
-    emailProvider:   emailState.provider,
-    emailConfigured: emailState.configured,
-    emailSender:     emailState.sender,
-  })
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    const emailState = getEmailProviderState()
+    Object.assign(response, {
+      emailProvider:   emailState.provider,
+      emailConfigured: emailState.configured,
+      emailSender:     emailState.sender,
+    })
+  }
+
+  res.json(response)
 })
 
 // API routes
@@ -103,6 +111,7 @@ app.use('/api/dashboard',      dashboardRouter)
 app.use('/api/notifications',  notificationsRouter)
 app.use('/api/analytics',      analyticsRouter)
 app.use('/api/admin',          adminRouter)
+app.use('/api/search',         searchRouter)
 
 // Serve built frontend
 const frontendDistPath = process.env.FRONTEND_DIST_PATH

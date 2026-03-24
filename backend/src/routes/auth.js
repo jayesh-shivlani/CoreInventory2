@@ -150,20 +150,42 @@ router.post('/auth/register', async (req, res) => {
     }
 
     const existingUser = await db.get('SELECT id FROM Users WHERE email = ?', normalizedEmail)
+    const requestedSignupRole = String(pending.role || 'Warehouse Staff').trim()
+    const grantedRole = requestedSignupRole === 'Manager' ? 'Warehouse Staff' : requestedSignupRole
+
     if (!existingUser) {
       await db.run(
         'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
-        pending.name, pending.email, pending.password_hash, 'Warehouse Staff',
+        pending.name, pending.email, pending.password_hash, grantedRole,
       )
     }
 
-    await db.run(
-      "UPDATE Signup_Verifications SET status = 'AWAITING_ADMIN_APPROVAL', otp_code = NULL WHERE email = ?",
-      normalizedEmail,
-    )
+    if (requestedSignupRole === 'Manager') {
+      await db.run(
+        "UPDATE Signup_Verifications SET status = 'AWAITING_ADMIN_APPROVAL', otp_code = NULL WHERE email = ?",
+        normalizedEmail,
+      )
+
+      return res.status(201).json({
+        message: 'Account created. Manager access is pending admin approval. You can sign in with warehouse staff access now.',
+      })
+    }
+
+    await db.run('DELETE FROM Signup_Verifications WHERE email = ?', normalizedEmail)
+
+    try {
+      const createdUser = await db.get('SELECT id FROM Users WHERE email = ?', normalizedEmail)
+      await db.run(
+        `INSERT INTO Role_Audit_Log
+           (action, target_user_id, target_user_email, old_role, new_role, performed_by_id, performed_by_email, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        'USER_REGISTERED', createdUser?.id ?? null, normalizedEmail, null, grantedRole,
+        createdUser?.id ?? null, normalizedEmail, 'Self-service warehouse staff signup completed after OTP verification',
+      )
+    } catch { /* non-fatal */ }
 
     return res.status(201).json({
-      message: 'Account created. Your requested role was sent to admin for approval.',
+      message: 'Account created. You can sign in now.',
     })
   } catch {
     return res.status(500).json({ message: 'Registration failed' })

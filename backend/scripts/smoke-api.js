@@ -154,6 +154,13 @@ async function run() {
     const me = await expectOk('Profile', '/users/me', { token })
     record('Profile', Boolean(me?.id), `email=${me?.email || 'unknown'}`)
 
+    const search = await expectOk('Global search', '/search?q=main', { token })
+    record(
+      'Global search',
+      Array.isArray(search?.results),
+      `results=${Array.isArray(search?.results) ? search.results.length : 0}`,
+    )
+
     const kpis = await expectOk('Dashboard KPIs', '/dashboard/kpis', { token })
     record(
       'Dashboard KPIs',

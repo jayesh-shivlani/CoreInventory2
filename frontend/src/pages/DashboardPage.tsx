@@ -3,12 +3,18 @@
  * Presents operational KPIs, filters, and low-stock alert summaries.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiRequest, safeNumber } from '../utils/helpers'
+import {
+  areDashboardFiltersEqual,
+  areKpisEqual,
+  areProductsEqual,
+} from '../utils/stability'
 import KpiCard from '../components/KpiCard'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { LIVE_SYNC_INTERVAL_MS } from '../config/constants'
+import { useLivePolling } from '../hooks/useLivePolling'
 import type { DashboardFilterResponse, KPIResponse, Product, Toast } from '../types/models'
 
 interface Props {
@@ -35,6 +41,7 @@ export default function DashboardPage({ token, pushToast }: Props) {
   })
   const [lowStockProducts, setLowStockProducts] = useState<Product[]>([])
   const previousLowStockCount = useRef(0)
+  const hasLoadedDashboardRef = useRef(false)
 
   const query = useMemo(() => {
     const params = new URLSearchParams()
@@ -46,61 +53,68 @@ export default function DashboardPage({ token, pushToast }: Props) {
     return s ? `?${s}` : ''
   }, [docType, status, warehouse, category])
 
-  useEffect(() => {
-    let active = true
-
-    const loadFilters = async () => {
-      try {
-        const opts = await apiRequest<DashboardFilterResponse>('/dashboard/filters', 'GET', token ?? undefined)
-        if (active) {
-          setFilterOptions({
-            documentTypes: Array.isArray(opts?.documentTypes) ? opts.documentTypes : [],
-            statuses:      Array.isArray(opts?.statuses)      ? opts.statuses      : [],
-            warehouses:    Array.isArray(opts?.warehouses)    ? opts.warehouses    : [],
-            categories:    Array.isArray(opts?.categories)    ? opts.categories    : [],
-          })
-        }
-      } catch { /* keep defaults */ }
+  const loadDashboard = useCallback(async (showLoader = false) => {
+    if (showLoader || !hasLoadedDashboardRef.current) {
+      setLoading(true)
     }
 
-    const load = async (showLoader = false) => {
-      if (showLoader) setLoading(true)
-      try {
-        const [raw, lowStockRows] = await Promise.all([
-          apiRequest<Partial<KPIResponse> | null>(`/dashboard/kpis${query}`, 'GET', token ?? undefined),
-          apiRequest<Product[]>('/products?lowStockOnly=true',               'GET', token ?? undefined),
-        ])
+    try {
+      const [opts, raw, lowStockRows] = await Promise.all([
+        apiRequest<DashboardFilterResponse>('/dashboard/filters', 'GET', token ?? undefined),
+        apiRequest<Partial<KPIResponse> | null>(`/dashboard/kpis${query}`, 'GET', token ?? undefined),
+        apiRequest<Product[]>('/products?lowStockOnly=true', 'GET', token ?? undefined),
+      ])
 
-        const items = Array.isArray(lowStockRows) ? lowStockRows : []
-        if (active) setLowStockProducts(items)
+      const nextFilters = {
+        documentTypes: Array.isArray(opts?.documentTypes) ? opts.documentTypes : [],
+        statuses: Array.isArray(opts?.statuses) ? opts.statuses : [],
+        warehouses: Array.isArray(opts?.warehouses) ? opts.warehouses : [],
+        categories: Array.isArray(opts?.categories) ? opts.categories : [],
+      }
+      setFilterOptions((previous) => (areDashboardFiltersEqual(previous, nextFilters) ? previous : nextFilters))
 
-        const latest = items.length
-        if (previousLowStockCount.current !== 0 && latest > previousLowStockCount.current) {
-          pushToast('info', `Low stock alerts increased to ${latest}`)
-        }
-        previousLowStockCount.current = latest
+      const nextLowStock = Array.isArray(lowStockRows) ? lowStockRows : []
+      setLowStockProducts((previous) => (areProductsEqual(previous, nextLowStock) ? previous : nextLowStock))
 
-        const data = ((raw ?? {}) as Partial<KPIResponse>)
-        if (!active) return
-        setKpis({
-          totalProductsInStock:       safeNumber(data.totalProductsInStock),
-          lowOrOutOfStockItems:       safeNumber(data.lowOrOutOfStockItems),
-          pendingReceipts:            safeNumber(data.pendingReceipts),
-          pendingDeliveries:          safeNumber(data.pendingDeliveries),
-          scheduledInternalTransfers: safeNumber(data.scheduledInternalTransfers),
-        })
-      } catch (err) {
-        pushToast('error', `Dashboard load failed: ${(err as Error).message}`)
-      } finally {
-        if (active && showLoader) setLoading(false)
+      const latest = nextLowStock.length
+      if (previousLowStockCount.current !== 0 && latest > previousLowStockCount.current) {
+        pushToast('info', `Low stock alerts increased to ${latest}`)
+      }
+      previousLowStockCount.current = latest
+
+      const data = (raw ?? {}) as Partial<KPIResponse>
+      const nextKpis = {
+        totalProductsInStock: safeNumber(data.totalProductsInStock),
+        lowOrOutOfStockItems: safeNumber(data.lowOrOutOfStockItems),
+        pendingReceipts: safeNumber(data.pendingReceipts),
+        pendingDeliveries: safeNumber(data.pendingDeliveries),
+        scheduledInternalTransfers: safeNumber(data.scheduledInternalTransfers),
+      }
+      setKpis((previous) => (areKpisEqual(previous, nextKpis) ? previous : nextKpis))
+    } catch (error) {
+      pushToast('error', `Dashboard load failed: ${(error as Error).message}`)
+    } finally {
+      if (showLoader || !hasLoadedDashboardRef.current) {
+        setLoading(false)
+        hasLoadedDashboardRef.current = true
       }
     }
+  }, [pushToast, query, token])
 
-    void loadFilters()
-    void load(true)
-    const timer = setInterval(() => { void load(false); void loadFilters() }, LIVE_SYNC_INTERVAL_MS)
-    return () => { active = false; clearInterval(timer) }
-  }, [query, token, pushToast])
+  useEffect(() => {
+    void loadDashboard(!hasLoadedDashboardRef.current)
+  }, [loadDashboard])
+
+  useLivePolling(
+    async () => {
+      await loadDashboard(false)
+    },
+    {
+      enabled: Boolean(token),
+      immediate: false,
+      intervalMs: LIVE_SYNC_INTERVAL_MS,
+    },
+  )
 
   const activeFilters = [docType, status, warehouse, category].filter(Boolean).length
 

@@ -9,6 +9,7 @@ Backend API for Core Inventory IMS, built with Node.js + Express and PostgreSQL.
 - Inventory operation lifecycle (Receipt, Delivery, Internal, Adjustment)
 - Stock movement validation and ledger generation
 - Dashboard aggregation endpoints
+- Global command-search API for products, operations, and locations
 
 ## Tech Stack
 
@@ -26,6 +27,8 @@ backend/
 |  |- auth.js      # token signing and auth middleware
 |  |- config.js    # environment loading + runtime config checks
 |  |- db.js        # DB adapter + schema bootstrap + seed
+|  |- routes/
+|  |  `- search.js # global command-search API
 |  |- services/
 |  |  `- emailService.js
 |  |- utils/
@@ -55,6 +58,7 @@ Important optional:
 - `PORT` : server port (default `4000`)
 - `JWT_SECRET` : JWT signing secret
 - `ALLOWED_ORIGINS` : comma-separated list of allowed browser origins
+  - Local development loopback and private-network origins remain allowed automatically when `NODE_ENV` is not `production`
 - `BREVO_API_KEY` : enable OTP email delivery
 - `FROM_EMAIL` : sender identity for OTP emails
 - `EMAIL_TIMEOUT_MS` : outbound email timeout in milliseconds (default `15000`)
@@ -127,6 +131,10 @@ Notifications:
 
 - `GET /api/notifications`
 
+Search:
+
+- `GET /api/search`
+
 ## Authorization Notes
 
 Admin (Admin role required):
@@ -141,12 +149,8 @@ Admin (Admin role required):
 
 ## Demo Credentials
 
-Local development seed user (non-production):
-
-- Email: `demo@coreinventory.app`
-- Password: `demo12345`
-
-Do not use seed/demo credentials in production.
+Use private deployment-managed credentials for judge or stakeholder access.
+Do not publish live or seeded credentials in the repository.
 
 All operational and read APIs require a valid JWT.
 
@@ -177,6 +181,7 @@ Always override the defaults via environment variables in production.
 
 - Set `JWT_SECRET` to a strong non-default secret.
 - Ensure `DATABASE_URL` is configured.
+- Startup automatically creates read-heavy indexes used by dashboard, search, operations, and ledger queries.
 - Set `ALLOWED_ORIGINS` (or `CLIENT_ORIGIN`) explicitly.
 - Set `EXPOSE_DEV_OTP=false`.
 - Keep `STRICT_EMAIL_DOMAIN_CHECK` enabled if your DNS environment is stable.

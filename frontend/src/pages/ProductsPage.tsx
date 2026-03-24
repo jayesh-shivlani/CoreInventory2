@@ -9,37 +9,23 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest, safeNumber } from '../utils/helpers'
 import { hasElevatedAccess } from '../utils/authHelpers'
 import { useConfirm } from '../hooks/useConfirm'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { useLivePolling } from '../hooks/useLivePolling'
+import { areProductFilterOptionsEqual, areProductsEqual } from '../utils/stability'
 import SyncStatusChip from '../components/SyncStatusChip'
-import { DEFAULT_CATEGORIES, DEFAULT_UOMS, LIVE_SYNC_INTERVAL_MS, API_BASE } from '../config/constants'
+import {
+  DEFAULT_CATEGORIES,
+  DEFAULT_UOMS,
+  LIVE_SYNC_INTERVAL_MS,
+  SEARCH_DEBOUNCE_MS,
+} from '../config/constants'
 import type { Product, ProductFilterOptions, ProductStockRow, Toast, UserProfile } from '../types/models'
+import { downloadFileFromApi } from '../utils/downloads'
 
 interface Props {
-  token:       string | null
-  pushToast:   (kind: Toast['kind'], text: string) => void
+  token: string | null
+  pushToast: (kind: Toast['kind'], text: string) => void
   currentUser: UserProfile | null
-}
-
-function downloadCSV(path: string, filename: string, token: string | null, pushToast: Props['pushToast']) {
-  void (async () => {
-    try {
-      const resp = await fetch(`${API_BASE}${path}`, {
-        headers: { Authorization: token ? `Bearer ${token}` : '' },
-      })
-      if (!resp.ok) throw new Error('Export failed')
-      const blob = await resp.blob()
-      const url  = URL.createObjectURL(blob)
-      const a    = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      pushToast('success', `${filename} downloaded`)
-    } catch {
-      pushToast('error', 'Export failed - please try again.')
-    }
-  })()
 }
 
 export default function ProductsPage({ token, pushToast, currentUser }: Props) {
@@ -59,10 +45,11 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const [stockLoadingForProductId, setStockLoadingForProductId]   = useState<number | null>(null)
 
   // Filters
-  const [search,          setSearch]          = useState('')
-  const [filterCategory,  setFilterCategory]  = useState('')
-  const [filterLocation,  setFilterLocation]  = useState('')
-  const [lowStockOnly,    setLowStockOnly]    = useState(false)
+  const [search,          setSearch]          = useState(() => new URLSearchParams(location.search).get('search') ?? '')
+  const [filterCategory,  setFilterCategory]  = useState(() => new URLSearchParams(location.search).get('category') ?? '')
+  const [filterLocation,  setFilterLocation]  = useState(() => new URLSearchParams(location.search).get('location') ?? '')
+  const [lowStockOnly,    setLowStockOnly]    = useState(() => new URLSearchParams(location.search).get('lowStockOnly') === 'true')
+  const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS)
 
   // Form fields
   const [name,          setName]          = useState('')
@@ -73,6 +60,13 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const [reorderMin,    setReorderMin]    = useState('0')
   const [sortBy, setSortBy] = useState<'name' | 'sku' | 'category' | 'uom' | 'stock' | 'location' | 'status'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const locationSyncRef = useRef<{
+    search: string
+    category: string
+    location: string
+    lowStockOnly: boolean
+  } | null>(null)
+  const productsCacheRef = useRef<Record<string, Product[]>>({})
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -80,6 +74,13 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     const nextCategory = params.get('category') ?? ''
     const nextLocation = params.get('location') ?? ''
     const nextLowStock = params.get('lowStockOnly') === 'true'
+
+    locationSyncRef.current = {
+      search: nextSearch,
+      category: nextCategory,
+      location: nextLocation,
+      lowStockOnly: nextLowStock,
+    }
 
     setSearch((prev) => (prev === nextSearch ? prev : nextSearch))
     setFilterCategory((prev) => (prev === nextCategory ? prev : nextCategory))
@@ -106,19 +107,26 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
 
   const hasLoadedProductsRef = useRef(false)
 
-  const load = useCallback(async (showLoader = false) => {
+  const load = useCallback(async (showLoader = false, searchValue = debouncedSearch) => {
     if (showLoader || !hasLoadedProductsRef.current) {
       setLoading(true)
     }
     try {
       const params = new URLSearchParams()
-      if (search.trim())         params.set('search',       search.trim())
+      if (searchValue.trim()) params.set('search', searchValue.trim())
       if (filterCategory.trim()) params.set('category',     filterCategory.trim())
       if (filterLocation.trim()) params.set('location',     filterLocation.trim())
       if (lowStockOnly)          params.set('lowStockOnly', 'true')
       const q = params.toString() ? `?${params.toString()}` : ''
+      const cacheKey = q || '__all__'
+      const cachedProducts = productsCacheRef.current[cacheKey]
+      if (cachedProducts) {
+        setProducts((previous) => (areProductsEqual(previous, cachedProducts) ? previous : cachedProducts))
+      }
       const data = await apiRequest<Product[]>(`/products${q}`, 'GET', token ?? undefined)
-      setProducts(Array.isArray(data) ? data : [])
+      const nextProducts = Array.isArray(data) ? data : []
+      productsCacheRef.current[cacheKey] = nextProducts
+      setProducts((previous) => (areProductsEqual(previous, nextProducts) ? previous : nextProducts))
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
@@ -127,30 +135,60 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
         hasLoadedProductsRef.current = true
       }
     }
-  }, [filterCategory, filterLocation, lowStockOnly, search, token, pushToast])
+  }, [debouncedSearch, filterCategory, filterLocation, lowStockOnly, token, pushToast])
 
   const loadFilterOptions = useCallback(async () => {
     try {
       const data = await apiRequest<ProductFilterOptions>('/products/filter-options', 'GET', token ?? undefined)
-      setFilterOptions({
+      const nextFilterOptions = {
         categories: Array.isArray(data?.categories) ? data.categories : [],
         locations:  Array.isArray(data?.locations)  ? data.locations  : [],
         uoms:       Array.isArray(data?.uoms)        ? data.uoms       : [],
-      })
+      }
+      setFilterOptions((previous) => (
+        areProductFilterOptionsEqual(previous, nextFilterOptions) ? previous : nextFilterOptions
+      ))
     } catch { /* keep defaults */ }
   }, [token])
 
-  useEffect(() => { void loadFilterOptions() }, [loadFilterOptions])
+  useEffect(() => {
+    void loadFilterOptions()
+  }, [loadFilterOptions])
 
   useEffect(() => {
-    void load(true)
-    const t = setInterval(() => { void load(false); void loadFilterOptions() }, LIVE_SYNC_INTERVAL_MS)
-    return () => clearInterval(t)
-  }, [load, loadFilterOptions])
+    void load(!hasLoadedProductsRef.current)
+  }, [load])
+
+  useLivePolling(
+    async () => {
+      await Promise.all([load(false), loadFilterOptions()])
+    },
+    {
+      enabled: Boolean(token),
+      immediate: false,
+      intervalMs: LIVE_SYNC_INTERVAL_MS,
+    },
+  )
 
   useEffect(() => {
+    const pendingLocationSync = locationSyncRef.current
+    if (pendingLocationSync) {
+      const settled =
+        search === pendingLocationSync.search &&
+        debouncedSearch === pendingLocationSync.search &&
+        filterCategory === pendingLocationSync.category &&
+        filterLocation === pendingLocationSync.location &&
+        lowStockOnly === pendingLocationSync.lowStockOnly
+
+      if (!settled) {
+        return
+      }
+
+      locationSyncRef.current = null
+    }
+
     const params = new URLSearchParams()
-    if (search.trim()) params.set('search', search.trim())
+    if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim())
     if (filterCategory.trim()) params.set('category', filterCategory.trim())
     if (filterLocation.trim()) params.set('location', filterLocation.trim())
     if (lowStockOnly) params.set('lowStockOnly', 'true')
@@ -160,7 +198,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     if (next !== current) {
       navigate({ pathname: location.pathname, search: next ? `?${next}` : '' }, { replace: true })
     }
-  }, [search, filterCategory, filterLocation, lowStockOnly, location.pathname, location.search, navigate])
+  }, [search, debouncedSearch, filterCategory, filterLocation, lowStockOnly, location.pathname, location.search, navigate])
 
   const categoryOptions = useMemo(
     () => Array.from(new Set([...DEFAULT_CATEGORIES, ...filterOptions.categories, category].filter(Boolean))),
@@ -291,7 +329,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                 <p>Manage catalog items, monitor stock, and keep reorder levels in control.</p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => downloadCSV('/export/products', 'core_inventory_products.csv', token, pushToast)}>
+                <button type="button" className="btn btn-secondary" onClick={() => void downloadFileFromApi('/export/products', 'core_inventory_products.csv', token, pushToast)}>
                   ↓ Export CSV
                 </button>
                 {canManage
@@ -346,7 +384,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                   <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
                   Low stock only
                 </label>
-                <button type="button" className="btn btn-primary" onClick={() => void load(true)}>Apply</button>
+                <button type="button" className="btn btn-primary" onClick={() => void load(false, search)}>Apply</button>
               </div>
             </div>
           </div>

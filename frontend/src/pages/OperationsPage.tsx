@@ -3,12 +3,14 @@
  * Manages receipt, delivery, transfer, and adjustment operation workflows.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useConfirm } from '../hooks/useConfirm'
+import { useLivePolling } from '../hooks/useLivePolling'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { hasElevatedAccess } from '../utils/authHelpers'
 import { apiRequest, formatDate, toOperationKind } from '../utils/helpers'
+import { areOperationsEqual, areProductsEqual, areWarehousesEqual } from '../utils/stability'
 import { LIVE_SYNC_INTERVAL_MS } from '../config/constants'
 import type { Operation, OperationDraftLine, Product, Toast, UserProfile, Warehouse } from '../types/models'
 
@@ -32,8 +34,8 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [focusedOperationId, setFocusedOperationId] = useState<number | null>(null)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  const [search, setSearch] = useState(() => new URLSearchParams(location.search).get('search') ?? '')
+  const [statusFilter, setStatusFilter] = useState(() => new URLSearchParams(location.search).get('status') ?? '')
   const [sortBy, setSortBy] = useState<'reference' | 'status' | 'source' | 'destination' | 'date'>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [supplier, setSupplier] = useState('')
@@ -42,6 +44,8 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   const [lines, setLines] = useState<OperationDraftLine[]>([
     { product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' },
   ])
+  const deferredSearch = useDeferredValue(search.trim().toLowerCase())
+  const locationSyncRef = useRef<{ search: string; status: string } | null>(null)
 
   const focusOperationId = useMemo(() => {
     const raw = new URLSearchParams(location.search).get('focusOp')
@@ -53,6 +57,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     const params = new URLSearchParams(location.search)
     const nextSearch = params.get('search') ?? ''
     const nextStatus = params.get('status') ?? ''
+    locationSyncRef.current = { search: nextSearch, status: nextStatus }
     setSearch((prev) => (prev === nextSearch ? prev : nextSearch))
     setStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus))
   }, [location.search])
@@ -69,9 +74,12 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
         apiRequest<Product[]>('/products', 'GET', token ?? undefined),
         apiRequest<Warehouse[]>('/locations', 'GET', token ?? undefined),
       ])
-      setOperations(Array.isArray(ops) ? ops : [])
-      setProducts(Array.isArray(prods) ? prods : [])
-      setLocations(Array.isArray(locs) ? locs : [])
+      const nextOperations = Array.isArray(ops) ? ops : []
+      const nextProducts = Array.isArray(prods) ? prods : []
+      const nextLocations = Array.isArray(locs) ? locs : []
+      setOperations((previous) => (areOperationsEqual(previous, nextOperations) ? previous : nextOperations))
+      setProducts((previous) => (areProductsEqual(previous, nextProducts) ? previous : nextProducts))
+      setLocations((previous) => (areWarehousesEqual(previous, nextLocations) ? previous : nextLocations))
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
@@ -84,11 +92,18 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
 
   useEffect(() => {
     void load(true)
-    const timer = setInterval(() => {
-      void load(false)
-    }, LIVE_SYNC_INTERVAL_MS)
-    return () => clearInterval(timer)
   }, [load])
+
+  useLivePolling(
+    async () => {
+      await load(false)
+    },
+    {
+      enabled: Boolean(token),
+      immediate: false,
+      intervalMs: LIVE_SYNC_INTERVAL_MS,
+    },
+  )
 
   useEffect(() => {
     if (!focusOperationId) return
@@ -262,20 +277,19 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   }
 
   const filteredOperations = useMemo(() => {
-    const query = search.trim().toLowerCase()
     return operations.filter((op) => {
       const statusOk = !statusFilter || op.status === statusFilter
       if (!statusOk) return false
-      if (!query) return true
+      if (!deferredSearch) return true
       const hay = [
         op.reference_number,
         op.source_location_name ?? '',
         op.destination_location_name ?? '',
         op.status,
       ].join(' ').toLowerCase()
-      return hay.includes(query)
+      return hay.includes(deferredSearch)
     })
-  }, [operations, search, statusFilter])
+  }, [deferredSearch, operations, statusFilter])
 
   const sortedOperations = useMemo(() => {
     const rank: Record<Operation['status'], number> = {
@@ -315,6 +329,16 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   const activeFilters = [search.trim(), statusFilter].filter(Boolean).length
 
   useEffect(() => {
+    const pendingLocationSync = locationSyncRef.current
+    if (pendingLocationSync) {
+      const settled = search === pendingLocationSync.search && statusFilter === pendingLocationSync.status
+      if (!settled) {
+        return
+      }
+
+      locationSyncRef.current = null
+    }
+
     const params = new URLSearchParams(location.search)
     if (search.trim()) params.set('search', search.trim())
     else params.delete('search')

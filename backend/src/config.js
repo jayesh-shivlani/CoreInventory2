@@ -24,21 +24,38 @@ const configuredOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_ORI
   .map((x) => x.trim())
   .filter(Boolean)
 
+function isPrivateIpv4(hostname) {
+  return (
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+  )
+}
+
 function isLocalDevOrigin(origin) {
   try {
     const url = new URL(origin)
-    return url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+    return (
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname === '::1' ||
+      isPrivateIpv4(url.hostname)
+    )
   } catch {
     return false
   }
 }
 
 function isCorsOriginAllowed(origin) {
-  // In local development, allow localhost callers when an explicit allow-list is not set.
-  const isDevLocalOrigin = process.env.NODE_ENV !== 'production' && origin && isLocalDevOrigin(origin)
   if (!origin) return true
-  if (configuredOrigins.length > 0) return configuredOrigins.includes(origin)
-  return Boolean(isDevLocalOrigin)
+  if (configuredOrigins.includes(origin)) return true
+
+  // Preserve a smooth local workflow even when production origins are configured in `.env`.
+  if (process.env.NODE_ENV !== 'production' && isLocalDevOrigin(origin)) {
+    return true
+  }
+
+  return false
 }
 
 function validateRuntimeConfig() {

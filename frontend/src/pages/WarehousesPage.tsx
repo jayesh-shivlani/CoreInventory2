@@ -8,8 +8,10 @@ import type { FormEvent } from 'react'
 import { apiRequest, safeNumber } from '../utils/helpers'
 import { hasElevatedAccess } from '../utils/authHelpers'
 import { useConfirm } from '../hooks/useConfirm'
+import { useLivePolling } from '../hooks/useLivePolling'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { LIVE_SYNC_INTERVAL_MS } from '../config/constants'
+import { areWarehousesEqual } from '../utils/stability'
 import type { Toast, UserProfile, Warehouse, WarehouseInventoryRow } from '../types/models'
 
 interface Props {
@@ -44,7 +46,8 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
     }
     try {
       const data = await apiRequest<Warehouse[]>('/locations', 'GET', token ?? undefined)
-      setWarehouses(Array.isArray(data) ? data : [])
+      const nextWarehouses = Array.isArray(data) ? data : []
+      setWarehouses((previous) => (areWarehousesEqual(previous, nextWarehouses) ? previous : nextWarehouses))
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
@@ -57,10 +60,18 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
 
   useEffect(() => {
     void load(true)
-    // Keep location lists synchronized for users that may be editing from multiple sessions.
-    const t = setInterval(() => { void load(false) }, LIVE_SYNC_INTERVAL_MS)
-    return () => clearInterval(t)
   }, [load])
+
+  useLivePolling(
+    async () => {
+      await load(false)
+    },
+    {
+      enabled: Boolean(token),
+      immediate: false,
+      intervalMs: LIVE_SYNC_INTERVAL_MS,
+    },
+  )
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()

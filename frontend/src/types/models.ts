@@ -126,6 +126,16 @@ export type Toast = {
   text: string
 }
 
+export type GlobalSearchResult = {
+  id: string
+  kind: 'product' | 'operation' | 'location'
+  title: string
+  subtitle: string
+  meta?: string
+  path: string
+  tone?: 'default' | 'warning' | 'danger'
+}
+
 export type OperationDraftLine = {
   product_id: string
   requested_quantity: string

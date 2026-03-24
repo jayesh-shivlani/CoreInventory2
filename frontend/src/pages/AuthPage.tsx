@@ -45,6 +45,7 @@ export default function AuthPage({ token, onLogin, pushToast }: Props) {
   const [resetConfirmPassword, setResetConfirmPassword] = useState('')
   const [otpSentTo,            setOtpSentTo]            = useState('')
   const [resendCooldown,       setResendCooldown]       = useState(0)
+  const isManagerSignup = requestedRole === 'Manager'
 
   useEffect(() => { if (token) navigate('/dashboard', { replace: true }) }, [token, navigate])
 
@@ -137,7 +138,12 @@ export default function AuthPage({ token, onLogin, pushToast }: Props) {
         } else {
           if (!signupOtp.trim()) { pushToast('error', 'OTP is required'); return }
           await apiRequest('/auth/register', 'POST', undefined, { name, email, password, role: requestedRole, otp: signupOtp })
-          pushToast('success', 'Account created. Sign in now - admin approval needed for your requested role.')
+          pushToast(
+            'success',
+            requestedRole === 'Manager'
+              ? 'Account created. Sign in now. Manager access is pending admin approval.'
+              : 'Account created. You can sign in now.',
+          )
           setSignupStep('request')
           setSignupOtp('')
           setSignupOtpSentTo('')
@@ -196,8 +202,12 @@ export default function AuthPage({ token, onLogin, pushToast }: Props) {
               {mode === 'login'
                 ? 'Sign in to continue managing inventory operations.'
                 : signupStep === 'request'
-                  ? 'Request an OTP to verify your email and submit your role request.'
-                  : 'Enter the OTP to verify your email and finish account setup.'}
+                  ? isManagerSignup
+                    ? 'Request an OTP to verify your email and submit your manager access request.'
+                    : 'Request an OTP to verify your email and create your warehouse staff account.'
+                  : isManagerSignup
+                    ? 'Enter the OTP to finish account setup and send your manager request for admin approval.'
+                    : 'Enter the OTP to finish account setup and sign in immediately after verification.'}
             </p>
           </div>
 
@@ -232,6 +242,9 @@ export default function AuthPage({ token, onLogin, pushToast }: Props) {
                   <option value="Warehouse Staff">Warehouse Staff</option>
                   <option value="Manager">Manager</option>
                 </select>
+                <p className="password-help">
+                  Warehouse Staff gets access immediately after OTP verification. Manager still requires admin approval.
+                </p>
               </div>
             )}
             <div className="form-field">
