@@ -146,6 +146,42 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     return 'Receipt'
   }, [operationType])
 
+  const operationGuidelines = useMemo(() => {
+    if (operationType === 'Delivery') {
+      return [
+        ['Source', 'Select where stock will be dispatched from.'],
+        ['Destination', 'Choose the customer location receiving stock.'],
+        ['Quantity', 'Requested quantity must be greater than zero.'],
+        ['Picked/Packed', 'Fill picked and packed quantities before final validation.'],
+      ] as const
+    }
+
+    if (operationType === 'Internal') {
+      return [
+        ['Source', 'Select the internal location sending stock.'],
+        ['Destination', 'Select the internal location receiving stock.'],
+        ['Quantity', 'Transfer quantities must be greater than zero.'],
+        ['Validation', 'Validate only after line items are fully reviewed.'],
+      ] as const
+    }
+
+    if (operationType === 'Adjustment') {
+      return [
+        ['Destination', 'Choose the location where stock is being corrected.'],
+        ['Quantity', 'Enter the corrected quantity for each product line.'],
+        ['Draft vs Validate', 'Save draft first if values need cross-checking.'],
+        ['Audit', 'Use clear values because adjustments affect stock history.'],
+      ] as const
+    }
+
+    return [
+      ['Supplier', 'Enter the vendor or source for incoming stock.'],
+      ['Destination', 'Choose where received stock will be stored.'],
+      ['Quantity', 'Received quantity must be greater than zero.'],
+      ['Validate', 'Use Validate after confirming all received quantities.'],
+    ] as const
+  }, [operationType])
+
   const isDelivery = operationType === 'Delivery'
   const needsSource = operationType === 'Delivery' || operationType === 'Internal'
   const needsDestination = operationType === 'Internal' || operationType === 'Delivery' || operationType === 'Adjustment'
@@ -461,7 +497,12 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
       )}
 
       {viewMode === 'form' && (
-        <div className="form-sheet">
+        <div className="operations-form-shell">
+          <div className="operations-form-header">
+            <h2>New {createLabel}</h2>
+            <p>Enter location details and line items, then save as draft or validate.</p>
+          </div>
+
           <div className="control-bar">
             <div className="control-bar-left">
               <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => { void submit(false) }}>
@@ -474,77 +515,94 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
             </div>
           </div>
 
-          <div className="field-row" style={{ marginBottom: 12 }}>
-            {operationType === 'Receipt' && (
-              <div className="field-group">
-                <label className="field-label">Supplier</label>
-                <input className="form-input" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
-              </div>
-            )}
-            {needsSource && (
-              <div className="field-group">
-                <label className="field-label">Source Location</label>
-                <select className="form-select" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)}>
-                  <option value="">Select source</option>
-                  {locations.map((loc) => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
-                </select>
-              </div>
-            )}
-            {needsDestination && (
-              <div className="field-group">
-                <label className="field-label">Destination Location</label>
-                <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)}>
-                  <option value="">Select destination</option>
-                  {locations.map((loc) => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Quantity</th>
-                {isDelivery && <th>Picked</th>}
-                {isDelivery && <th>Packed</th>}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((line, idx) => (
-                <tr key={idx}>
-                  <td>
-                    <select className="form-select" value={line.product_id} onChange={(e) => updateLine(idx, { product_id: e.target.value })}>
-                      <option value="">Select product</option>
-                      {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+          <div className="operation-form-grid">
+            <div className="form-sheet operations-form-sheet">
+              <div className="field-row" style={{ marginBottom: 12 }}>
+                {operationType === 'Receipt' && (
+                  <div className="field-group">
+                    <label className="field-label">Supplier</label>
+                    <input className="form-input" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+                  </div>
+                )}
+                {needsSource && (
+                  <div className="field-group">
+                    <label className="field-label">Source Location</label>
+                    <select className="form-select" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)}>
+                      <option value="">Select source</option>
+                      {locations.map((loc) => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
                     </select>
-                  </td>
-                  <td>
-                    <input className="form-input" type="number" min={0} value={line.requested_quantity} onChange={(e) => updateLine(idx, { requested_quantity: e.target.value })} />
-                  </td>
-                  {isDelivery && (
-                    <td>
-                      <input className="form-input" type="number" min={0} value={line.picked_quantity ?? '0'} onChange={(e) => updateLine(idx, { picked_quantity: e.target.value })} />
-                    </td>
-                  )}
-                  {isDelivery && (
-                    <td>
-                      <input className="form-input" type="number" min={0} value={line.packed_quantity ?? '0'} onChange={(e) => updateLine(idx, { packed_quantity: e.target.value })} />
-                    </td>
-                  )}
-                  <td>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeLine(idx)}>
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                )}
+                {needsDestination && (
+                  <div className="field-group">
+                    <label className="field-label">Destination Location</label>
+                    <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)}>
+                      <option value="">Select destination</option>
+                      {locations.map((loc) => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
 
-          <div style={{ marginTop: 10 }}>
-            <button type="button" className="btn btn-secondary" onClick={addLine}>+ Add Line</button>
+              <div className="data-table-wrap operations-form-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Quantity</th>
+                      {isDelivery && <th>Picked</th>}
+                      {isDelivery && <th>Packed</th>}
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((line, idx) => (
+                      <tr key={idx}>
+                        <td>
+                          <select className="form-select" value={line.product_id} onChange={(e) => updateLine(idx, { product_id: e.target.value })}>
+                            <option value="">Select product</option>
+                            {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                          </select>
+                        </td>
+                        <td>
+                          <input className="form-input" type="number" min={0} value={line.requested_quantity} onChange={(e) => updateLine(idx, { requested_quantity: e.target.value })} />
+                        </td>
+                        {isDelivery && (
+                          <td>
+                            <input className="form-input" type="number" min={0} value={line.picked_quantity ?? '0'} onChange={(e) => updateLine(idx, { picked_quantity: e.target.value })} />
+                          </td>
+                        )}
+                        {isDelivery && (
+                          <td>
+                            <input className="form-input" type="number" min={0} value={line.packed_quantity ?? '0'} onChange={(e) => updateLine(idx, { packed_quantity: e.target.value })} />
+                          </td>
+                        )}
+                        <td>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeLine(idx)}>
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="operations-form-add-row">
+                <button type="button" className="btn btn-secondary" onClick={addLine}>+ Add Line</button>
+              </div>
+            </div>
+
+            <div className="panel-card operations-form-meta">
+              <div className="panel-card-header">Guidelines</div>
+              <div className="panel-card-body">
+                <div className="info-grid">
+                  {operationGuidelines.map(([dt, dd]) => (
+                    <div key={dt} className="info-item"><dt>{dt}</dt><dd>{dd}</dd></div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

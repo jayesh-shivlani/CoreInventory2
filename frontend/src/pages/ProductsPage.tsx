@@ -475,7 +475,12 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
       )}
 
       {viewMode === 'form' && (
-        <form onSubmit={submit}>
+        <form className="product-form-shell" onSubmit={submit}>
+          <div className="product-form-header">
+            <h2>{editingProductId ? 'Edit Product' : 'New Product'}</h2>
+            <p>Provide product details, then save to update the catalog.</p>
+          </div>
+
           <div className="control-bar">
             <div className="control-bar-left">
               <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
@@ -488,7 +493,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
             )}
           </div>
           <div className="product-form-grid">
-            <div className="form-sheet">
+            <div className="form-sheet product-form-sheet">
               <div className="form-title-area">
                 <div className="form-doc-subtitle">{editingProductId ? 'Edit Product' : 'New Product'}</div>
                 <input className="form-doc-title" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Steel Rods" />

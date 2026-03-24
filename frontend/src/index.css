@@ -1721,6 +1721,37 @@ a { text-decoration: none; color: inherit; }
   align-items: start;
 }
 
+.product-form-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.product-form-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.product-form-header p {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.product-form-sheet {
+  max-width: 100%;
+  padding: 20px;
+}
+
+.product-form-sheet .form-doc-subtitle {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text);
+}
+
 .product-form-meta .panel-card-body {
   padding: 16px;
 }
@@ -1945,6 +1976,53 @@ a { text-decoration: none; color: inherit; }
   align-items: start;
 }
 
+.operations-form-sheet {
+  max-width: 100%;
+  padding: 20px;
+}
+
+.operations-form-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.operations-form-header {
+  margin-bottom: 12px;
+}
+
+.operations-form-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.operations-form-header p {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.operations-form-sheet .control-bar {
+  margin-bottom: 12px;
+}
+
+.operations-form-table-wrap {
+  margin-top: 8px;
+}
+
+.operations-form-add-row {
+  margin-top: 10px;
+}
+
+.operations-form-meta .panel-card-body {
+  padding: 16px;
+}
+
+.operations-form-meta {
+  min-height: 100%;
+}
+
 .operation-row-actions {
   display: flex;
   gap: 6px;
@@ -2061,6 +2139,8 @@ a { text-decoration: none; color: inherit; }
 @media (max-width: 900px) {
   .split-layout { grid-template-columns: 1fr; }
   .field-row { grid-template-columns: 1fr; gap: 12px; }
+  .control-bar { align-items: flex-start; }
+  .control-bar-left { flex-wrap: wrap; }
   .sidebar { width: 200px; }
   :root { --sidebar-w: 200px; }
   .auth-layout { grid-template-columns: 1fr; }

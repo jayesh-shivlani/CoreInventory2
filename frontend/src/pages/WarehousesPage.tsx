@@ -200,6 +200,11 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
   const internalCount = warehouses.filter((w) => w.type.toLowerCase() === 'internal').length
   const vendorCount   = warehouses.filter((w) => w.type.toLowerCase() === 'vendor').length
   const customerCount = warehouses.filter((w) => w.type.toLowerCase() === 'customer').length
+  const locationTypeBadges: Record<string, string> = {
+    internal: 'badge-ready',
+    vendor: 'badge-done',
+    customer: 'badge-canceled',
+  }
 
   const sortedWarehouses = useMemo(() => {
     const copy = [...warehouses]
@@ -323,7 +328,7 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
                   <Fragment key={wh.id}>
                     <tr>
                       <td><strong>{wh.name}</strong></td>
-                      <td><span className="badge badge-draft">{wh.type}</span></td>
+                      <td><span className={`badge ${locationTypeBadges[wh.type.toLowerCase()] ?? 'badge-draft'}`}>{wh.type}</span></td>
                       <td>
                         <button
                           type="button"
