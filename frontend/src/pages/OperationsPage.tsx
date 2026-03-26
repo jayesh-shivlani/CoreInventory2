@@ -38,7 +38,6 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   const [statusFilter, setStatusFilter] = useState(() => new URLSearchParams(location.search).get('status') ?? '')
   const [sortBy, setSortBy] = useState<'reference' | 'status' | 'source' | 'destination' | 'date'>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [supplier, setSupplier] = useState('')
   const [sourceLocation, setSourceLocation] = useState('')
   const [destinationLocation, setDestinationLocation] = useState('')
   const [lines, setLines] = useState<OperationDraftLine[]>([
@@ -126,7 +125,6 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   }, [focusOperationId, operations, viewMode])
 
   const resetDraft = () => {
-    setSupplier('')
     setSourceLocation('')
     setDestinationLocation('')
     setLines([{ product_id: '', requested_quantity: '0', picked_quantity: '0', packed_quantity: '0' }])
@@ -186,6 +184,20 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   const needsSource = operationType === 'Delivery' || operationType === 'Internal'
   const needsDestination = operationType === 'Internal' || operationType === 'Delivery' || operationType === 'Adjustment'
 
+  const sourceLocationOptions = useMemo(() => {
+    if (operationType === 'Receipt') return locations.filter((loc) => loc.type === 'Vendor')
+    if (operationType === 'Delivery') return locations.filter((loc) => loc.type === 'Internal')
+    if (operationType === 'Internal') return locations.filter((loc) => loc.type === 'Internal')
+    return []
+  }, [locations, operationType])
+
+  const destinationLocationOptions = useMemo(() => {
+    if (operationType === 'Receipt') return locations.filter((loc) => loc.type === 'Internal')
+    if (operationType === 'Delivery') return locations.filter((loc) => loc.type === 'Customer')
+    if (operationType === 'Internal' || operationType === 'Adjustment') return locations.filter((loc) => loc.type === 'Internal')
+    return []
+  }, [locations, operationType])
+
   const updateLine = (index: number, patch: Partial<OperationDraftLine>) => {
     setLines((prev) => prev.map((line, i) => {
       if (i !== index) return line
@@ -223,8 +235,8 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
       }
     }
 
-    if (operationType === 'Receipt' && !supplier.trim()) {
-      pushToast('error', 'Supplier is required for receipts')
+    if (operationType === 'Receipt' && !sourceLocation.trim()) {
+      pushToast('error', 'Supplier (vendor warehouse) is required for receipts')
       return
     }
     if (needsSource && !sourceLocation.trim()) {
@@ -235,12 +247,15 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
       pushToast('error', 'Destination location is required')
       return
     }
+    if (operationType === 'Internal' && sourceLocation.trim() === destinationLocation.trim()) {
+      pushToast('error', 'Source and destination must be different for internal transfers')
+      return
+    }
 
     setSaving(true)
     try {
       const created = await apiRequest<{ id: number }>('/operations', 'POST', token ?? undefined, {
         type: operationType,
-        supplier: supplier || undefined,
         source_location: sourceLocation || undefined,
         destination_location: destinationLocation || undefined,
         lines: lines.map((line) => ({
@@ -520,16 +535,27 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
               <div className="field-row" style={{ marginBottom: 12 }}>
                 {operationType === 'Receipt' && (
                   <div className="field-group">
-                    <label className="field-label">Supplier</label>
-                    <input className="form-input" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+                    <label className="field-label">Supplier (Vendor Warehouse)</label>
+                    <select
+                      className="form-select"
+                      value={sourceLocation}
+                      onChange={(e) => setSourceLocation(e.target.value)}
+                    >
+                      <option value="" disabled hidden={!!sourceLocation}>Select vendor warehouse</option>
+                      {locations.filter((loc) => loc.type === 'Vendor').map((loc) => (
+                        <option key={loc.id} value={loc.name}>{loc.name}</option>
+                      ))}
+                    </select>
                   </div>
                 )}
                 {needsSource && (
                   <div className="field-group">
                     <label className="field-label">Source Location</label>
                     <select className="form-select" value={sourceLocation} onChange={(e) => setSourceLocation(e.target.value)}>
-                      <option value="">Select source</option>
-                      {locations.map((loc) => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
+                      <option value="" disabled hidden={!!sourceLocation}>
+                        {operationType === 'Delivery' || operationType === 'Internal' ? 'Select source warehouse' : 'Select source'}
+                      </option>
+                      {sourceLocationOptions.map((loc) => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
                     </select>
                   </div>
                 )}
@@ -537,8 +563,18 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
                   <div className="field-group">
                     <label className="field-label">Destination Location</label>
                     <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)}>
-                      <option value="">Select destination</option>
-                      {locations.map((loc) => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
+                      <option value="" disabled hidden={!!destinationLocation}>
+                        {operationType === 'Delivery' || operationType === 'Internal' ? 'Select destination warehouse' : operationType === 'Adjustment' ? 'Select destination warehouse' : 'Select destination'}
+                      </option>
+                      {destinationLocationOptions.map((loc) => (
+                        <option
+                          key={loc.id}
+                          value={loc.name}
+                          disabled={operationType === 'Internal' && sourceLocation === loc.name}
+                        >
+                          {loc.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}

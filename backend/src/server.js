@@ -139,16 +139,19 @@ app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' })
 })
 
-// Bootstrap
-async function bootstrap() {
-  validateRuntimeConfig()
-  await initDb()
-  app.listen(PORT, () => {
-    console.log(`Core Inventory backend listening on http://localhost:${PORT}`)
+
+// Bootstrap only if run directly
+if (require.main === module) {
+  (async () => {
+    validateRuntimeConfig()
+    await initDb()
+    app.listen(PORT, () => {
+      console.log(`Core Inventory backend listening on http://localhost:${PORT}`)
+    })
+  })().catch((error) => {
+    console.error('Failed to bootstrap backend:', error)
+    process.exit(1)
   })
 }
 
-bootstrap().catch((error) => {
-  console.error('Failed to bootstrap backend:', error)
-  process.exit(1)
-})
+module.exports = app

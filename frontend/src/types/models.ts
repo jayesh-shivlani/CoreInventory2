@@ -62,7 +62,7 @@ export type LedgerEntry = {
 export type Warehouse = {
   id: number
   name: string
-  type: string
+  type: 'Vendor' | 'Internal' | 'Customer'
 }
 
 export type UserProfile = {

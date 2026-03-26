@@ -24,6 +24,11 @@ async function getCurrentQty(db, productId, locationId) {
   return Number(row?.quantity || 0)
 }
 
+async function findLocationByName(db, name) {
+  if (!name) return null
+  return db.get('SELECT id, name, type FROM Locations WHERE name = ?', String(name).trim())
+}
+
 async function setQty(db, productId, locationId, quantity) {
   await db.run(
     `INSERT INTO Stock_Quants (product_id, location_id, quantity) VALUES (?, ?, ?)
@@ -105,21 +110,47 @@ router.post('/', requireAuth, async (req, res) => {
     const db = await getDb()
 
     const result = await db.transaction(async (tx) => {
-      const srcName = source_location ||
-        (type === 'Receipt' ? supplier || 'Vendor Location'
-          : type === 'Adjustment' ? 'Inventory Audit'
-            : 'Main Warehouse')
+      const expectedSourceType = type === 'Receipt' ? 'Vendor' : 'Internal'
+      const expectedDestinationType = type === 'Delivery' ? 'Customer' : 'Internal'
 
-      const dstName = destination_location ||
-        (type === 'Delivery' ? 'Customer Location'
-          : type === 'Adjustment' ? source_location || 'Main Warehouse'
-            : 'Main Warehouse')
+      let source
+      if (type === 'Adjustment') {
+        source = await ensureLocationByName(tx, 'Inventory Audit', 'Internal')
+      } else {
+        if (!source_location || !String(source_location).trim()) {
+          return res.status(400).json({ message: 'Source location is required for this operation type' })
+        }
+        const sourceName = String(source_location).trim()
+        source = await findLocationByName(tx, sourceName)
+        if (!source) {
+          return res.status(400).json({ message: `Source location \"${sourceName}\" was not found` })
+        }
+        if (source.type !== expectedSourceType) {
+          return res.status(400).json({
+            message: `Source location must be of type ${expectedSourceType} for ${type}`,
+          })
+        }
+      }
 
-      const sourceType = type === 'Receipt' ? 'Vendor' : 'Internal'
-      const destType   = type === 'Delivery' ? 'Customer' : 'Internal'
+      if (!destination_location || !String(destination_location).trim()) {
+        return res.status(400).json({ message: 'Destination location is required for this operation type' })
+      }
+      const destinationName = String(destination_location).trim()
+      const destination = await findLocationByName(tx, destinationName)
+      if (!destination) {
+        return res.status(400).json({ message: `Destination location \"${destinationName}\" was not found` })
+      }
+      if (destination.type !== expectedDestinationType) {
+        return res.status(400).json({
+          message: `Destination location must be of type ${expectedDestinationType} for ${type}`,
+        })
+      }
 
-      const source      = await ensureLocationByName(tx, String(srcName).trim(), sourceType)
-      const destination = await ensureLocationByName(tx, String(dstName).trim(), destType)
+      if (type === 'Internal' && source.id === destination.id) {
+        return res.status(400).json({
+          message: 'Source and destination must be different for internal transfers',
+        })
+      }
 
       const op = await tx.run(
         `INSERT INTO Operations
