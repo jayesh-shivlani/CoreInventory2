@@ -58,6 +58,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const [uom,           setUom]           = useState('Units')
   const [initialStock,  setInitialStock]  = useState('0')
   const [reorderMin,    setReorderMin]    = useState('0')
+  const [initialWarehouseId, setInitialWarehouseId] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'sku' | 'category' | 'uom' | 'stock' | 'location' | 'status'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const locationSyncRef = useRef<{
@@ -67,6 +68,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     lowStockOnly: boolean
   } | null>(null)
   const productsCacheRef = useRef<Record<string, Product[]>>({})
+  // const initialWarehouseSelectRef = useRef<HTMLSelectElement | null>(null)
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -90,7 +92,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
 
   const resetForm = () => {
     setEditingProductId(null); setName(''); setSku(''); setCategory('')
-    setUom('Units'); setInitialStock('0'); setReorderMin('0')
+    setUom('Units'); setInitialStock('0'); setReorderMin('0'); setInitialWarehouseId('')
   }
 
   const startNew = () => {
@@ -215,6 +217,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     ),
     [filterOptions.uoms, uom],
   )
+  // Removed ensureInitialWarehouseDropdownSpace logic to prevent unwanted scrolling
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -226,6 +229,9 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     const parsedReorder = Number(reorderMin)
     if (Number.isNaN(parsedInitial) || Number.isNaN(parsedReorder) || parsedInitial < 0 || parsedReorder < 0) {
       pushToast('error', 'Stock values must be non-negative numbers'); return
+    }
+    if (parsedInitial > 0 && !initialWarehouseId) {
+      pushToast('error', 'Initial Warehouse is required when Initial Stock is greater than zero.'); return
     }
 
     setSaving(true)
@@ -240,6 +246,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
         await apiRequest('/products', 'POST', token ?? undefined, {
           name: name.trim(), sku: sku.trim(), category: category.trim(),
           unit_of_measure: uom.trim(), initial_stock: parsedInitial, reorder_minimum: parsedReorder,
+          initial_warehouse_id: parsedInitial > 0 ? initialWarehouseId : undefined,
         })
         pushToast('success', 'Product saved')
       }
@@ -383,7 +390,11 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                 <label className="filter-label">Location</label>
                 <select className="form-select" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
                   <option value="">All locations</option>
-                  {filterOptions.locations.map((v) => <option key={v} value={v}>{v}</option>)}
+                  {filterOptions.locations.map((loc: any) => (
+                    <option key={loc.id || loc.name || loc} value={loc.id || loc.name || loc}>
+                      {loc.name || loc}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="product-filter-actions">
@@ -510,6 +521,26 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                   <label className="field-label">Internal Reference (SKU)</label>
                   <input className="form-input" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="e.g. SKU-001" required />
                 </div>
+                {!editingProductId && (
+                  <div className="field-group">
+                    <label className="field-label">Initial Warehouse</label>
+                    <select
+                      className="form-select"
+                      value={initialWarehouseId}
+                      onChange={e => setInitialWarehouseId(e.target.value)}
+                      required={Number(initialStock) > 0}
+                    >
+                      <option value="" disabled hidden={!!initialWarehouseId}>Select initial warehouse</option>
+                      {filterOptions.locations
+                        .filter((loc: any) => loc && typeof loc === 'object' && loc.type === 'Internal')
+                        .map((loc: any) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
                 <div className="field-group">
                   <label className="field-label">Category</label>
                   <select className="form-select" value={category} onChange={(e) => setCategory(e.target.value)} required>

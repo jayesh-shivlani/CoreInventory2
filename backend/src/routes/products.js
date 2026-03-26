@@ -29,12 +29,12 @@ router.get('/filter-options', requireAuth, async (req, res) => {
     const db = await getDb()
     const [categories, locations, uoms] = await Promise.all([
       db.all("SELECT DISTINCT category FROM Products WHERE category <> '' ORDER BY category"),
-      db.all("SELECT DISTINCT name FROM Locations WHERE name <> '' ORDER BY name"),
+      db.all("SELECT DISTINCT id, name, type FROM Locations WHERE name <> '' ORDER BY name"),
       db.all("SELECT DISTINCT unit_of_measure FROM Products WHERE unit_of_measure <> '' ORDER BY unit_of_measure"),
     ])
     return res.json({
       categories: categories.map((x) => x.category).filter(Boolean),
-      locations:  locations.map((x) => x.name).filter(Boolean),
+      locations:  locations.filter((x) => x && x.id && x.name && x.type),
       uoms:       uoms.map((x) => x.unit_of_measure).filter(Boolean),
     })
   } catch {
@@ -131,7 +131,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 // Create
 router.post('/', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
   try {
-    const { name, sku, category, unit_of_measure, initial_stock, reorder_minimum } = req.body || {}
+    const { name, sku, category, unit_of_measure, initial_stock, reorder_minimum, initial_warehouse_id } = req.body || {}
 
     if (!name || !sku || !category || !unit_of_measure) {
       return res.status(400).json({ message: 'name, sku, category and unit_of_measure are required' })
@@ -155,10 +155,20 @@ router.post('/', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
       )
 
       if (stock > 0) {
-        const mainLoc = await ensureLocationByName(tx, 'Main Warehouse', 'Internal')
+        let warehouseId = null
+        if (initial_warehouse_id) {
+          // Validate warehouse exists and is internal
+          const warehouse = await tx.get('SELECT id, type FROM Locations WHERE id = ?', initial_warehouse_id)
+          if (!warehouse) throw new Error('Selected warehouse does not exist')
+          if (warehouse.type !== 'Internal') throw new Error('Selected warehouse is not internal')
+          warehouseId = warehouse.id
+        } else {
+          const mainLoc = await ensureLocationByName(tx, 'Main Warehouse', 'Internal')
+          warehouseId = mainLoc.id
+        }
         await tx.run(
           'INSERT INTO Stock_Quants (product_id, location_id, quantity) VALUES (?, ?, ?)',
-          inserted.lastID, mainLoc.id, stock,
+          inserted.lastID, warehouseId, stock,
         )
       }
 
@@ -166,8 +176,10 @@ router.post('/', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
     })
 
     return res.status(201).json(result)
-  } catch {
-    return res.status(500).json({ message: 'Failed to save product' })
+  } catch (err) {
+    let message = 'Failed to save product'
+    if (err && err.message) message = err.message
+    return res.status(500).json({ message })
   }
 })
 

@@ -1725,6 +1725,7 @@ a { text-decoration: none; color: inherit; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding-bottom: 320px;
 }
 
 .product-form-header h2 {
