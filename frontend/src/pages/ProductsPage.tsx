@@ -22,6 +22,13 @@ import {
 import type { Product, ProductFilterOptions, ProductStockRow, Toast, UserProfile } from '../types/models'
 import { downloadFileFromApi } from '../utils/downloads'
 
+/** Shape of items returned in ProductFilterOptions.locations */
+interface LocationOption {
+  id: number | string
+  name: string
+  type?: string
+}
+
 interface Props {
   token: string | null
   pushToast: (kind: Toast['kind'], text: string) => void
@@ -390,11 +397,12 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                 <label className="filter-label">Location</label>
                 <select className="form-select" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
                   <option value="">All locations</option>
-                  {filterOptions.locations.map((loc: any) => (
-                    <option key={loc.id || loc.name || loc} value={loc.id || loc.name || loc}>
-                      {loc.name || loc}
-                    </option>
-                  ))}
+                  {Array.isArray(filterOptions.locations) && filterOptions.locations.length > 0 &&
+                    (filterOptions.locations as unknown as LocationOption[]).map((loc) => (
+                      <option key={loc.id || loc.name} value={loc.id || loc.name}>
+                        {loc.name}
+                      </option>
+                    ))}
                 </select>
               </div>
               <div className="product-filter-actions">
@@ -531,11 +539,11 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                       required={Number(initialStock) > 0}
                     >
                       <option value="" disabled hidden={!!initialWarehouseId}>Select initial warehouse</option>
-                      {filterOptions.locations
-                        .filter((loc: any) => loc && typeof loc === 'object' && loc.type === 'Internal')
-                        .map((loc: any) => (
-                          <option key={loc.id} value={loc.id}>
-                            {loc.name}
+                      {(filterOptions.locations as unknown as LocationOption[])
+                        .filter((loc) => loc && typeof loc === 'object' && (loc as LocationOption).type === 'Internal')
+                        .map((loc) => (
+                          <option key={(loc as LocationOption).id} value={(loc as LocationOption).id}>
+                            {(loc as LocationOption).name}
                           </option>
                         ))}
                     </select>
