@@ -81,7 +81,7 @@ function KpiCard({ label, value, variant, icon, onClick }: KpiCardProps) {
     >
       <div className="kpi-card-top">
         {icon && KPI_ICONS[icon] && (
-          <span className="kpi-icon">{KPI_ICONS[icon]}</span>
+          <div className="kpi-icon-wrap">{KPI_ICONS[icon]}</div>
         )}
         <div className="kpi-value">{value.toLocaleString()}</div>
       </div>

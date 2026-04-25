@@ -120,18 +120,29 @@ export default function DashboardPage({ token, pushToast }: Props) {
 
   return (
     <section className="dashboard-page">
-      {/* -- Filters -- */}
-      <div className="dashboard-header-card">
-        <div className="list-header dashboard-section-header">
-          <h2>Dashboard Filters</h2>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => { setDocType(''); setStatus(''); setWarehouse(''); setCategory('') }}
-            disabled={activeFilters === 0}
-          >
-            Reset
-          </button>
+      {/* -- Premium Hero -- */}
+      <div className="dashboard-hero-premium">
+        <div className="dashboard-hero-content">
+          <h1>Inventory Overview</h1>
+          <p>Real-time pulse of your warehouse operations</p>
+        </div>
+        <div className="dashboard-hero-stats">
+          <div className="hero-stat-glass">
+            <span className="hero-stat-label">Stock Risk</span>
+            <strong className="hero-stat-value text-warning">{kpis.lowOrOutOfStockItems}</strong>
+          </div>
+          <div className="hero-stat-glass">
+            <span className="hero-stat-label">Pending Work</span>
+            <strong className="hero-stat-value">{kpis.pendingReceipts + kpis.pendingDeliveries + kpis.scheduledInternalTransfers}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* -- Sleek Filter Bar -- */}
+      <div className="dashboard-filter-bar">
+        <div className="list-header">
+          <h2>Filters</h2>
+          <span className="text-muted" style={{ fontSize: 11 }}>{activeFilters} active</span>
         </div>
         <div className="filters-row">
           {[
@@ -149,22 +160,19 @@ export default function DashboardPage({ token, pushToast }: Props) {
             </div>
           ))}
         </div>
-      </div>
-
-      {/* -- Hero -- */}
-      <div className="dashboard-hero-card">
-        <div className="dashboard-title">Inventory Dashboard</div>
-        <p className="dashboard-subtitle">Real-time status of inventory, operations, and transfer workload.</p>
-        <div className="dashboard-meta-grid">
-          <div className="dashboard-meta-item"><span>Filters Applied</span><strong>{activeFilters}</strong></div>
-          <div className="dashboard-meta-item"><span>Pending Work</span><strong>{kpis.pendingReceipts + kpis.pendingDeliveries + kpis.scheduledInternalTransfers}</strong></div>
-          <div className="dashboard-meta-item"><span>Stock Risk</span><strong>{kpis.lowOrOutOfStockItems}</strong></div>
-        </div>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => { setDocType(''); setStatus(''); setWarehouse(''); setCategory('') }}
+          disabled={activeFilters === 0}
+        >
+          Reset
+        </button>
       </div>
 
       {/* -- KPI Cards -- */}
-      <div className="dashboard-header-card">
-        <div className="list-header dashboard-section-header">
+      <div>
+        <div className="list-header dashboard-section-header" style={{ marginBottom: 16 }}>
           <h2>Operational Metrics</h2>
           <SyncStatusChip show={loading} />
         </div>
@@ -206,22 +214,33 @@ export default function DashboardPage({ token, pushToast }: Props) {
 
       {/* -- Low Stock Alerts -- */}
       {lowStockProducts.length > 0 && (
-        <div className="dashboard-header-card low-stock-alert-card">
-          <div className="list-header dashboard-section-header">
-            <h2>Low Stock Alerts</h2>
-            <div className="list-header-meta" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="alert-count-pill">{lowStockProducts.length} product(s)</span>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/products?lowStockOnly=true')}>
-                View all
-              </button>
-            </div>
+        <div className="low-stock-premium-card">
+          <div className="low-stock-header">
+            <h2>
+              <svg viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="2.5" width="18" height="18">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              Low Stock Alerts
+            </h2>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/products?lowStockOnly=true')}>
+              View all {lowStockProducts.length}
+            </button>
           </div>
-          <div className="low-stock-alert-list">
+          <div className="low-stock-list">
             {lowStockProducts.slice(0, 6).map((p) => (
-              <div key={p.id} className="low-stock-alert-item">
-                <strong>{p.name}</strong>
-                <span>{p.sku}</span>
-                <span>On hand {safeNumber(p.availableStock)} / Reorder min {safeNumber(p.reorder_minimum)}</span>
+              <div key={p.id} className="low-stock-item">
+                <div className="low-stock-info">
+                  <span className="low-stock-name">{p.name}</span>
+                  <span className="low-stock-sku">SKU: {p.sku}</span>
+                </div>
+                <div className="low-stock-metrics">
+                  <span className="text-muted" style={{ fontSize: 13 }}>Reorder min: {safeNumber(p.reorder_minimum)}</span>
+                  <span className={`low-stock-pill ${safeNumber(p.availableStock) <= 0 ? 'out-of-stock' : ''}`}>
+                    {safeNumber(p.availableStock)} on hand
+                  </span>
+                </div>
               </div>
             ))}
           </div>
