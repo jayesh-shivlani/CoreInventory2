@@ -597,6 +597,54 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
           </div>
 
           <div className="operation-form-grid">
+            {/* ── Horizontal Guidelines Banner ── */}
+            <div className="op-guidelines-banner">
+              <div className="op-guidelines-banner-header">
+                <span className="op-guidelines-banner-title">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                    <path fillRule="evenodd" d="M18 10A8 8 0 1 1 2 10a8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
+                  </svg>
+                  {createLabel} Guidelines
+                </span>
+              </div>
+
+              <div className="op-guidelines-banner-body">
+                {/* Left — live pre-submit checklist */}
+                <div className="op-checklist-col">
+                  <span className="op-checklist-label">Pre-submit checklist</span>
+                  {guidelineChecklist.map(([label, done]) => (
+                    <div
+                      key={`${operationType}-chk-${label}`}
+                      className={`op-checklist-item ${done ? 'is-done' : 'is-pending'}`}
+                    >
+                      <span className="op-checklist-dot" />
+                      {done ? '✓ ' : ''}{label}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Right — scrollable guideline cards */}
+                <div className="op-guideline-cards-scroll">
+                  {operationGuidelines.map(([title, body]) => (
+                    <div key={`${operationType}-card-${title}`} className="op-guideline-card">
+                      <span className="op-guideline-card-title">{title}</span>
+                      <span className="op-guideline-card-body">{body}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Readiness alerts strip (only when present) */}
+              {guidelineAlerts.length > 0 && (
+                <div className="op-guidelines-alerts">
+                  {guidelineAlerts.map((alert) => (
+                    <span key={alert} className="op-guidelines-alert-item">{alert}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── Form Sheet ── */}
             <div className="form-sheet operations-form-sheet">
               <div className="field-row" style={{ marginBottom: 12 }}>
                 {operationType === 'Receipt' && (
@@ -694,42 +742,6 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
 
               <div className="operations-form-add-row">
                 <button type="button" className="btn btn-secondary" onClick={addLine}>+ Add Line</button>
-              </div>
-            </div>
-
-            <div className="panel-card operations-form-meta">
-              <div className="panel-card-header">{createLabel} Guidelines</div>
-              <div className="panel-card-body">
-                {guidelineAlerts.length > 0 && (
-                  <div className="warning-text" style={{ marginBottom: 12 }}>
-                    <strong>Readiness checks:</strong>
-                    <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
-                      {guidelineAlerts.map((alert) => (
-                        <li key={alert}>{alert}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                <div className="info-item" style={{ marginBottom: 12 }}>
-                  <dt>Pre-submit checklist</dt>
-                  <dd>
-                    <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
-                      {guidelineChecklist.map(([label, done]) => (
-                        <li key={`${operationType}-${label}`} className={done ? undefined : 'muted'}>
-                          {done ? 'Done: ' : 'Pending: '}
-                          {label}
-                        </li>
-                      ))}
-                    </ul>
-                  </dd>
-                </div>
-
-                <div className="info-grid">
-                  {operationGuidelines.map(([dt, dd]) => (
-                    <div key={`${operationType}-${dt}`} className="info-item"><dt>{dt}</dt><dd>{dd}</dd></div>
-                  ))}
-                </div>
               </div>
             </div>
           </div>
