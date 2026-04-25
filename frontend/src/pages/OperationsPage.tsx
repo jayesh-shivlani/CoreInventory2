@@ -182,7 +182,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
 
   const isDelivery = operationType === 'Delivery'
   const needsSource = operationType === 'Delivery' || operationType === 'Internal'
-  const needsDestination = operationType === 'Internal' || operationType === 'Delivery' || operationType === 'Adjustment'
+  const needsDestination = operationType === 'Receipt' || operationType === 'Internal' || operationType === 'Delivery' || operationType === 'Adjustment'
 
   const sourceLocationOptions = useMemo(() => {
     if (operationType === 'Receipt') return locations.filter((loc) => loc.type === 'Vendor')
@@ -197,6 +197,22 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     if (operationType === 'Internal' || operationType === 'Adjustment') return locations.filter((loc) => loc.type === 'Internal')
     return []
   }, [locations, operationType])
+
+  useEffect(() => {
+    setSourceLocation((previous) => (
+      previous && !sourceLocationOptions.some((loc) => loc.name === previous)
+        ? ''
+        : previous
+    ))
+  }, [sourceLocationOptions])
+
+  useEffect(() => {
+    setDestinationLocation((previous) => (
+      previous && !destinationLocationOptions.some((loc) => loc.name === previous)
+        ? ''
+        : previous
+    ))
+  }, [destinationLocationOptions])
 
   const updateLine = (index: number, patch: Partial<OperationDraftLine>) => {
     setLines((prev) => prev.map((line, i) => {
@@ -542,7 +558,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
                       onChange={(e) => setSourceLocation(e.target.value)}
                     >
                       <option value="" disabled hidden={!!sourceLocation}>Select vendor warehouse</option>
-                      {locations.filter((loc) => loc.type === 'Vendor').map((loc) => (
+                      {sourceLocationOptions.map((loc) => (
                         <option key={loc.id} value={loc.name}>{loc.name}</option>
                       ))}
                     </select>
@@ -564,7 +580,9 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
                     <label className="field-label">Destination Location</label>
                     <select className="form-select" value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)}>
                       <option value="" disabled hidden={!!destinationLocation}>
-                        {operationType === 'Delivery' || operationType === 'Internal' ? 'Select destination warehouse' : operationType === 'Adjustment' ? 'Select destination warehouse' : 'Select destination'}
+                        {operationType === 'Delivery'
+                          ? 'Select customer location'
+                          : 'Select destination warehouse'}
                       </option>
                       {destinationLocationOptions.map((loc) => (
                         <option
