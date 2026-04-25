@@ -147,36 +147,40 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
   const operationGuidelines = useMemo(() => {
     if (operationType === 'Delivery') {
       return [
-        ['Source', 'Select where stock will be dispatched from.'],
-        ['Destination', 'Choose the customer location receiving stock.'],
-        ['Quantity', 'Requested quantity must be greater than zero.'],
-        ['Picked/Packed', 'Fill picked and packed quantities before final validation.'],
+        ['Source warehouse', 'Dispatch only from an internal warehouse with confirmed stock availability.'],
+        ['Customer destination', 'Select the customer location receiving stock before saving the draft.'],
+        ['Requested quantity', 'Every line must have quantity greater than zero and match order intent.'],
+        ['Picked and packed', 'Populate picked and packed values before validation for accurate fulfillment tracking.'],
+        ['Validation timing', 'Validate only after all lines, locations, and fulfillment quantities are reviewed.'],
       ] as const
     }
 
     if (operationType === 'Internal') {
       return [
-        ['Source', 'Select the internal location sending stock.'],
-        ['Destination', 'Select the internal location receiving stock.'],
-        ['Quantity', 'Transfer quantities must be greater than zero.'],
-        ['Validation', 'Validate only after line items are fully reviewed.'],
+        ['Source location', 'Choose the internal location sending stock for the transfer.'],
+        ['Destination location', 'Choose a different internal location receiving stock.'],
+        ['Transfer quantities', 'All transfer quantities must be greater than zero.'],
+        ['Stock checks', 'Confirm source stock sufficiency before validation to avoid operational errors.'],
+        ['Final review', 'Validate only after location and line-level details are verified.'],
       ] as const
     }
 
     if (operationType === 'Adjustment') {
       return [
-        ['Destination', 'Choose the location where stock is being corrected.'],
-        ['Quantity', 'Enter the corrected quantity for each product line.'],
-        ['Draft vs Validate', 'Save draft first if values need cross-checking.'],
-        ['Audit', 'Use clear values because adjustments affect stock history.'],
+        ['Adjustment location', 'Select the internal location where inventory correction is applied.'],
+        ['Corrected quantity', 'Enter corrected quantities per product line with careful review.'],
+        ['Draft before validate', 'Use Save Draft when quantities require supervisor cross-checks.'],
+        ['Audit impact', 'Adjustments directly affect stock history and should be treated as high-impact changes.'],
+        ['Validation control', 'Validate only when discrepancy checks are complete and accurate.'],
       ] as const
     }
 
     return [
-      ['Supplier', 'Enter the vendor or source for incoming stock.'],
-      ['Destination', 'Choose where received stock will be stored.'],
-      ['Quantity', 'Received quantity must be greater than zero.'],
-      ['Validate', 'Use Validate after confirming all received quantities.'],
+      ['Supplier source', 'Select the vendor warehouse providing the incoming stock.'],
+      ['Receiving destination', 'Choose the internal warehouse where received stock will be stored.'],
+      ['Received quantity', 'Enter received quantity for each line, always greater than zero.'],
+      ['Discrepancy handling', 'Resolve any overage or shortage before final validation.'],
+      ['Validation timing', 'Validate only after physical receiving checks are complete.'],
     ] as const
   }, [operationType])
 
@@ -197,6 +201,52 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     if (operationType === 'Internal' || operationType === 'Adjustment') return locations.filter((loc) => loc.type === 'Internal')
     return []
   }, [locations, operationType])
+
+  const guidelineAlerts = useMemo(() => {
+    const alerts: string[] = []
+
+    if (products.length === 0) {
+      alerts.push('No products are available. Create products before validating an operation.')
+    }
+
+    if (operationType === 'Receipt' && sourceLocationOptions.length === 0) {
+      alerts.push('No vendor warehouses found. Add a Vendor location to create receipts.')
+    }
+
+    if (needsSource && sourceLocationOptions.length === 0) {
+      alerts.push('No valid source locations available for this operation type.')
+    }
+
+    if (needsDestination && destinationLocationOptions.length === 0) {
+      alerts.push('No valid destination locations available for this operation type.')
+    }
+
+    return alerts
+  }, [
+    destinationLocationOptions.length,
+    needsDestination,
+    needsSource,
+    operationType,
+    products.length,
+    sourceLocationOptions.length,
+  ])
+
+  const guidelineChecklist = useMemo(() => {
+    const hasLine = lines.length > 0
+    const hasProducts = lines.every((line) => Boolean(line.product_id))
+    const quantitiesOk = lines.every((line) => {
+      const qty = Number(line.requested_quantity)
+      if (!Number.isFinite(qty) || qty < 0) return false
+      return operationType === 'Adjustment' || qty > 0
+    })
+
+    return [
+      ['Required locations selected', (!needsSource || Boolean(sourceLocation.trim())) && (!needsDestination || Boolean(destinationLocation.trim()))],
+      ['At least one line added', hasLine],
+      ['Products selected on all lines', hasProducts],
+      ['Line quantities valid', quantitiesOk],
+    ] as const
+  }, [destinationLocation, lines, needsDestination, needsSource, operationType, sourceLocation])
 
   useEffect(() => {
     setSourceLocation((previous) => (
@@ -648,11 +698,39 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
             </div>
 
             <div className="panel-card operations-form-meta">
-              <div className="panel-card-header">Guidelines</div>
+              <div className="panel-card-header">{createLabel} Guidelines</div>
               <div className="panel-card-body">
-                <div className="info-grid">
+                {guidelineAlerts.length > 0 && (
+                  <div className="warning-text operations-guideline-alert">
+                    <strong>Readiness checks:</strong>
+                    <ul className="operations-guideline-list">
+                      {guidelineAlerts.map((alert) => (
+                        <li key={alert}>{alert}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="info-item operations-guideline-checklist">
+                  <dt>Pre-submit checklist</dt>
+                  <dd>
+                    <ul className="operations-guideline-list">
+                      {guidelineChecklist.map(([label, done]) => (
+                        <li
+                          key={`${operationType}-${label}`}
+                          className={done ? 'operations-guideline-done' : 'operations-guideline-pending'}
+                        >
+                          {done ? 'Done: ' : 'Pending: '}
+                          {label}
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+
+                <div className="info-grid operations-guideline-grid">
                   {operationGuidelines.map(([dt, dd]) => (
-                    <div key={dt} className="info-item"><dt>{dt}</dt><dd>{dd}</dd></div>
+                    <div key={`${operationType}-${dt}`} className="info-item"><dt>{dt}</dt><dd>{dd}</dd></div>
                   ))}
                 </div>
               </div>
