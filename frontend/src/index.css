@@ -1505,7 +1505,6 @@ a { text-decoration: none; color: inherit; }
   text-transform: uppercase;
   color: var(--text-muted);
   letter-spacing: 0.04em;
-  margin: 0;
   margin-bottom: 4px;
 }
 
@@ -1513,7 +1512,6 @@ a { text-decoration: none; color: inherit; }
   font-size: 14px;
   font-weight: 500;
   color: var(--text);
-  margin: 0;
 }
 
 /* --- Toast Notifications ------------------------------------ */
@@ -2020,48 +2018,10 @@ a { text-decoration: none; color: inherit; }
 
 .operations-form-meta .panel-card-body {
   padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .operations-form-meta {
   min-height: 100%;
-}
-
-.operations-guideline-alert {
-  margin: 0;
-}
-
-.operations-guideline-alert strong {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.operations-guideline-checklist {
-  margin: 0;
-}
-
-.operations-guideline-list {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.operations-guideline-done {
-  color: #1a6832;
-  font-weight: 500;
-}
-
-.operations-guideline-pending {
-  color: var(--text-muted);
-}
-
-.operations-guideline-grid {
-  grid-template-columns: 1fr;
-  gap: 10px;
 }
 
 .operation-row-actions {

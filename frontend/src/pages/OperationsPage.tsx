@@ -701,9 +701,9 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
               <div className="panel-card-header">{createLabel} Guidelines</div>
               <div className="panel-card-body">
                 {guidelineAlerts.length > 0 && (
-                  <div className="warning-text operations-guideline-alert">
+                  <div className="warning-text" style={{ marginBottom: 12 }}>
                     <strong>Readiness checks:</strong>
-                    <ul className="operations-guideline-list">
+                    <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
                       {guidelineAlerts.map((alert) => (
                         <li key={alert}>{alert}</li>
                       ))}
@@ -711,15 +711,12 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
                   </div>
                 )}
 
-                <div className="info-item operations-guideline-checklist">
+                <div className="info-item" style={{ marginBottom: 12 }}>
                   <dt>Pre-submit checklist</dt>
                   <dd>
-                    <ul className="operations-guideline-list">
+                    <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
                       {guidelineChecklist.map(([label, done]) => (
-                        <li
-                          key={`${operationType}-${label}`}
-                          className={done ? 'operations-guideline-done' : 'operations-guideline-pending'}
-                        >
+                        <li key={`${operationType}-${label}`} className={done ? undefined : 'muted'}>
                           {done ? 'Done: ' : 'Pending: '}
                           {label}
                         </li>
@@ -728,7 +725,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
                   </dd>
                 </div>
 
-                <div className="info-grid operations-guideline-grid">
+                <div className="info-grid">
                   {operationGuidelines.map(([dt, dd]) => (
                     <div key={`${operationType}-${dt}`} className="info-item"><dt>{dt}</dt><dd>{dd}</dd></div>
                   ))}
