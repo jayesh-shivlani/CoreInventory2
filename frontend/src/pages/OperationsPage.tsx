@@ -150,7 +150,7 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
         ['Source warehouse', 'Dispatch only from an internal warehouse with confirmed stock availability.'],
         ['Customer destination', 'Select the customer location receiving stock before saving the draft.'],
         ['Requested quantity', 'Every line must have quantity greater than zero and match order intent.'],
-        ['Picked and packed', 'Populate picked and packed values before validation for accurate fulfillment tracking.'],
+        ['Picked & packed rule', 'Picked ≥ requested, packed ≥ requested, and packed ≤ picked. All three must hold to validate.'],
         ['Validation timing', 'Validate only after all lines, locations, and fulfillment quantities are reviewed.'],
       ] as const
     }
@@ -240,13 +240,29 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
       return operationType === 'Adjustment' || qty > 0
     })
 
-    return [
+    // For Delivery: picked ≥ requested AND packed ≥ requested AND packed ≤ picked
+    const pickedPackedOk = isDelivery
+      ? lines.every((line) => {
+          const requested = Number(line.requested_quantity)
+          const picked = Number(line.picked_quantity ?? 0)
+          const packed = Number(line.packed_quantity ?? 0)
+          return picked >= requested && packed >= requested && packed <= picked
+        })
+      : true
+
+    const base = [
       ['Required locations selected', (!needsSource || Boolean(sourceLocation.trim())) && (!needsDestination || Boolean(destinationLocation.trim()))],
       ['At least one line added', hasLine],
       ['Products selected on all lines', hasProducts],
       ['Line quantities valid', quantitiesOk],
-    ] as const
-  }, [destinationLocation, lines, needsDestination, needsSource, operationType, sourceLocation])
+    ] as [string, boolean][]
+
+    if (isDelivery) {
+      base.push(['Picked & packed quantities cover requested', pickedPackedOk])
+    }
+
+    return base
+  }, [destinationLocation, isDelivery, lines, needsDestination, needsSource, operationType, sourceLocation])
 
   useEffect(() => {
     setSourceLocation((previous) => (
@@ -298,6 +314,28 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
       if (operationType !== 'Adjustment' && requested <= 0) {
         pushToast('error', 'Quantity must be greater than zero')
         return
+      }
+
+      // Delivery-specific: picked & packed must cover requested when validating
+      if (isDelivery && validateNow) {
+        const picked = Number(line.picked_quantity ?? 0)
+        const packed = Number(line.packed_quantity ?? 0)
+        if (!Number.isFinite(picked) || picked < 0 || !Number.isFinite(packed) || packed < 0) {
+          pushToast('error', 'Picked and packed quantities must be non-negative numbers')
+          return
+        }
+        if (picked < requested) {
+          pushToast('error', `Picked quantity (${picked}) must be ≥ requested quantity (${requested})`)
+          return
+        }
+        if (packed < requested) {
+          pushToast('error', `Packed quantity (${packed}) must be ≥ requested quantity (${requested})`)
+          return
+        }
+        if (packed > picked) {
+          pushToast('error', `Packed quantity (${packed}) cannot exceed picked quantity (${picked})`)
+          return
+        }
       }
     }
 

@@ -228,14 +228,18 @@ router.post('/:id/validate', requireAuth, async (req, res) => {
           const currentSource = await getCurrentQty(tx, productId, operation.source_location_id)
           const picked = Number(line.picked_quantity ?? 0)
           const packed = Number(line.packed_quantity ?? 0)
-          const effectivePicked = picked > 0 ? picked : requested
-          const effectivePacked = packed > 0 ? packed : requested
 
-          if (effectivePicked < requested || effectivePacked < requested) {
-            throw new Error('Delivery validation requires picked and packed quantities to cover requested quantity')
+          if (!Number.isFinite(picked) || picked < 0 || !Number.isFinite(packed) || packed < 0) {
+            throw new Error('Picked and packed quantities must be non-negative numbers')
           }
-          if (effectivePacked > effectivePicked) {
-            throw new Error('Packed quantity cannot exceed picked quantity')
+          if (picked < requested) {
+            throw new Error(`Picked quantity (${picked}) must be ≥ requested quantity (${requested}) for delivery validation`)
+          }
+          if (packed < requested) {
+            throw new Error(`Packed quantity (${packed}) must be ≥ requested quantity (${requested}) for delivery validation`)
+          }
+          if (packed > picked) {
+            throw new Error(`Packed quantity (${packed}) cannot exceed picked quantity (${picked})`)
           }
           if (currentSource < requested) {
             throw new Error('Insufficient stock for delivery validation')
