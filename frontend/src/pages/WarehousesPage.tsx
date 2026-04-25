@@ -181,12 +181,12 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
 
       await apiRequest(`/operations/${created.id}/validate`, 'POST', token ?? undefined)
 
-      setLocationInventory((prev) => ({
-        ...prev,
-        [warehouse.id]: (prev[warehouse.id] || []).map((item) => (
-          item.product_id === row.product_id ? { ...item, quantity: nextQty } : item
-        )),
-      }))
+      // Clear the inventory cache for this warehouse so re-expanding fetches fresh data
+      setLocationInventory((prev) => {
+        const next = { ...prev }
+        delete next[warehouse.id]
+        return next
+      })
 
       pushToast('success', `Stock adjusted for ${row.product_name}`)
       void load(false)
