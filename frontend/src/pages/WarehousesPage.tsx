@@ -12,7 +12,13 @@ import { useLivePolling } from '../hooks/useLivePolling'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { LIVE_SYNC_INTERVAL_MS } from '../config/constants'
 import { areWarehousesEqual } from '../utils/stability'
-import type { Toast, UserProfile, Warehouse, WarehouseInventoryRow } from '../types/models'
+import type {
+  PaginatedWarehouseInventoryResponse,
+  Toast,
+  UserProfile,
+  Warehouse,
+  WarehouseInventoryRow,
+} from '../types/models'
 
 interface Props {
   token:       string | null
@@ -32,6 +38,9 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
   const [expandedLocationId, setExpandedLocationId] = useState<number | null>(null)
   const [inventoryLoadingId, setInventoryLoadingId] = useState<number | null>(null)
   const [locationInventory, setLocationInventory] = useState<Record<number, WarehouseInventoryRow[]>>({})
+  const [inventoryPageByLocation, setInventoryPageByLocation] = useState<Record<number, number>>({})
+  const [inventoryTotalByLocation, setInventoryTotalByLocation] = useState<Record<number, number>>({})
+  const INVENTORY_LIMIT = 15
   const [inventorySearchByLocation, setInventorySearchByLocation] = useState<Record<number, string>>({})
   const [adjustingKey, setAdjustingKey] = useState<string | null>(null)
   const [warehouseSortBy, setWarehouseSortBy] = useState<'name' | 'type'>('name')
@@ -100,6 +109,35 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
     }
   }
 
+  const fetchWarehouseInventoryPage = async (warehouseId: number, page: number) => {
+    setInventoryLoadingId(warehouseId)
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(INVENTORY_LIMIT),
+      })
+      const payload = await apiRequest<PaginatedWarehouseInventoryResponse>(
+        `/locations/${warehouseId}/inventory?${params.toString()}`,
+        'GET',
+        token ?? undefined,
+      )
+      const rows = Array.isArray(payload?.data) ? payload.data : []
+      setLocationInventory((prev) => ({
+        ...prev,
+        [warehouseId]: rows,
+      }))
+      setInventoryTotalByLocation((prev) => ({
+        ...prev,
+        [warehouseId]: typeof payload?.total === 'number' ? payload.total : rows.length,
+      }))
+      setInventoryPageByLocation((prev) => ({ ...prev, [warehouseId]: page }))
+    } catch (err) {
+      pushToast('error', (err as Error).message)
+    } finally {
+      setInventoryLoadingId(null)
+    }
+  }
+
   const toggleWarehouseInventory = async (warehouseId: number) => {
     if (expandedLocationId === warehouseId) {
       setExpandedLocationId(null)
@@ -107,21 +145,8 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
     }
 
     setExpandedLocationId(warehouseId)
-    if (locationInventory[warehouseId]) return
-
-    setInventoryLoadingId(warehouseId)
-    try {
-      const rows = await apiRequest<WarehouseInventoryRow[]>(`/locations/${warehouseId}/inventory`, 'GET', token ?? undefined)
-      setLocationInventory((prev) => ({
-        ...prev,
-        [warehouseId]: Array.isArray(rows) ? rows : [],
-      }))
-    } catch (err) {
-      pushToast('error', (err as Error).message)
-      setExpandedLocationId(null)
-    } finally {
-      setInventoryLoadingId(null)
-    }
+    const page = inventoryPageByLocation[warehouseId] || 1
+    await fetchWarehouseInventoryPage(warehouseId, page)
   }
 
   const exportWarehouseInventory = (warehouseName: string, rows: WarehouseInventoryRow[]) => {
@@ -187,6 +212,16 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
         delete next[warehouse.id]
         return next
       })
+      setInventoryTotalByLocation((prev) => {
+        const next = { ...prev }
+        delete next[warehouse.id]
+        return next
+      })
+      setInventoryPageByLocation((prev) => {
+        const next = { ...prev }
+        delete next[warehouse.id]
+        return next
+      })
 
       pushToast('success', `Stock adjusted for ${row.product_name}`)
       void load(false)
@@ -197,7 +232,7 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
     }
   }
 
-  const internalCount = warehouses.filter((w) => w.type.toLowerCase() === 'internal').length
+  const internalCount = warehouses.filter((w) => String(w.type || '').trim().toLowerCase().startsWith('internal')).length
   const vendorCount   = warehouses.filter((w) => w.type.toLowerCase() === 'vendor').length
   const customerCount = warehouses.filter((w) => w.type.toLowerCase() === 'customer').length
   const locationTypeBadges: Record<string, string> = {
@@ -330,13 +365,17 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
                       <td><strong>{wh.name}</strong></td>
                       <td><span className={`badge ${locationTypeBadges[wh.type.toLowerCase()] ?? 'badge-draft'}`}>{wh.type}</span></td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => { void toggleWarehouseInventory(wh.id) }}
-                        >
-                          {expandedLocationId === wh.id ? 'Hide Stock' : 'View Stock'}
-                        </button>
+                        {String(wh.type || '').trim().toLowerCase().startsWith('internal') ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => { void toggleWarehouseInventory(wh.id) }}
+                          >
+                            {expandedLocationId === wh.id ? 'Hide Stock' : 'View Stock'}
+                          </button>
+                        ) : (
+                          <span className="muted">Internal only</span>
+                        )}
                       </td>
                       <td>
                         {canManage ? (
@@ -361,6 +400,9 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
                             <>
                               {(() => {
                                 const rows = locationInventory[wh.id] || []
+                                const inventoryPage = inventoryPageByLocation[wh.id] || 1
+                                const totalInventoryRows = inventoryTotalByLocation[wh.id] ?? rows.length
+                                const totalInventoryPages = Math.max(1, Math.ceil(totalInventoryRows / INVENTORY_LIMIT))
                                 const query = (inventorySearchByLocation[wh.id] || '').trim().toLowerCase()
                                 const filteredRows = query
                                   ? rows.filter((row) =>
@@ -397,7 +439,7 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
                                   <div className="inline-stock-card" style={{ marginTop: 8 }}>
                                     <div className="operations-overview-top" style={{ marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
                                       <div className="list-header-meta" style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                                        <span className="muted">Products: <strong>{rows.length}</strong></span>
+                                        <span className="muted">Products: <strong>{totalInventoryRows}</strong></span>
                                         <span className="muted">Total Units: <strong>{safeNumber(totalUnits)}</strong></span>
                                         <span className="muted">Low Stock: <strong>{lowStockCount}</strong></span>
                                       </div>
@@ -475,6 +517,27 @@ export default function WarehousesPage({ token, pushToast, currentUser }: Props)
                                         </tbody>
                                       </table>
                                     </div>
+                                    {totalInventoryRows > INVENTORY_LIMIT && (
+                                      <div className="pagination-controls" style={{ marginTop: 10 }}>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          disabled={inventoryPage <= 1 || inventoryLoadingId === wh.id}
+                                          onClick={() => { void fetchWarehouseInventoryPage(wh.id, inventoryPage - 1) }}
+                                        >
+                                          Previous
+                                        </button>
+                                        <span className="pagination-info">Page {inventoryPage} of {totalInventoryPages}</span>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          disabled={inventoryPage >= totalInventoryPages || inventoryLoadingId === wh.id}
+                                          onClick={() => { void fetchWarehouseInventoryPage(wh.id, inventoryPage + 1) }}
+                                        >
+                                          Next
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 )
                               })()}

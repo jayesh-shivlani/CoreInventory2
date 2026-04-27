@@ -25,6 +25,8 @@ function getPool() {
     pgPool = new Pool({
       connectionString: DB_URL,
       ssl: { rejectUnauthorized: false },
+      statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS || 10000),
+      query_timeout: Number(process.env.DB_QUERY_TIMEOUT_MS || 10000),
     })
   }
   return pgPool

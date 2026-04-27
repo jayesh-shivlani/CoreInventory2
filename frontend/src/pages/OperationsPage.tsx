@@ -70,11 +70,11 @@ export default function OperationsPage({ token, pushToast, currentUser }: Props)
     try {
       const [ops, prods, locs] = await Promise.all([
         apiRequest<Operation[]>(`/operations?type=${operationType}`, 'GET', token ?? undefined),
-        apiRequest<Product[]>('/products', 'GET', token ?? undefined),
+        apiRequest<{ data: Product[], total: number }>('/products?limit=1000', 'GET', token ?? undefined),
         apiRequest<Warehouse[]>('/locations', 'GET', token ?? undefined),
       ])
       const nextOperations = Array.isArray(ops) ? ops : []
-      const nextProducts = Array.isArray(prods) ? prods : []
+      const nextProducts = Array.isArray(prods?.data) ? prods.data : []
       const nextLocations = Array.isArray(locs) ? locs : []
       setOperations((previous) => (areOperationsEqual(previous, nextOperations) ? previous : nextOperations))
       setProducts((previous) => (areProductsEqual(previous, nextProducts) ? previous : nextProducts))

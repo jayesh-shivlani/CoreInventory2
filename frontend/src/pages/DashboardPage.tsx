@@ -42,6 +42,8 @@ export default function DashboardPage({ token, pushToast }: Props) {
   const [lowStockProducts, setLowStockProducts] = useState<Product[]>([])
   const previousLowStockCount = useRef(0)
   const hasLoadedDashboardRef = useRef(false)
+  const requestSeqRef = useRef(0)
+  const activeAbortControllerRef = useRef<AbortController | null>(null)
 
   const query = useMemo(() => {
     const params = new URLSearchParams()
@@ -53,27 +55,51 @@ export default function DashboardPage({ token, pushToast }: Props) {
     return s ? `?${s}` : ''
   }, [docType, status, warehouse, category])
 
+  const lowStockQuery = useMemo(() => {
+    const params = new URLSearchParams()
+    params.set('lowStockOnly', 'true')
+    params.set('limit', '200')
+    if (category) params.set('category', category)
+    if (warehouse) params.set('location', warehouse)
+    return `?${params.toString()}`
+  }, [category, warehouse])
+
   const loadDashboard = useCallback(async (showLoader = false) => {
+    requestSeqRef.current += 1
+    const requestId = requestSeqRef.current
+
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort()
+    }
+
+    const controller = new AbortController()
+    activeAbortControllerRef.current = controller
+
     if (showLoader || !hasLoadedDashboardRef.current) {
       setLoading(true)
     }
 
     try {
       const [opts, raw, lowStockRows] = await Promise.all([
-        apiRequest<DashboardFilterResponse>('/dashboard/filters', 'GET', token ?? undefined),
-        apiRequest<Partial<KPIResponse> | null>(`/dashboard/kpis${query}`, 'GET', token ?? undefined),
-        apiRequest<Product[]>('/products?lowStockOnly=true', 'GET', token ?? undefined),
+        apiRequest<DashboardFilterResponse>('/dashboard/filters', 'GET', token ?? undefined, undefined, { signal: controller.signal }),
+        apiRequest<Partial<KPIResponse> | null>(`/dashboard/kpis${query}`, 'GET', token ?? undefined, undefined, { signal: controller.signal }),
+        apiRequest<{data: Product[], total: number}>(`/products${lowStockQuery}`, 'GET', token ?? undefined, undefined, { signal: controller.signal }),
       ])
+
+      // Ignore stale responses from older request generations.
+      if (requestId !== requestSeqRef.current || controller.signal.aborted) {
+        return
+      }
 
       const nextFilters = {
         documentTypes: Array.isArray(opts?.documentTypes) ? opts.documentTypes : [],
         statuses: Array.isArray(opts?.statuses) ? opts.statuses : [],
-        warehouses: Array.isArray(opts?.warehouses) ? opts.warehouses : [],
+        warehouses: Array.isArray(opts?.warehouses) ? opts.warehouses.filter((name) => String(name || '').trim().length > 0) : [],
         categories: Array.isArray(opts?.categories) ? opts.categories : [],
       }
       setFilterOptions((previous) => (areDashboardFiltersEqual(previous, nextFilters) ? previous : nextFilters))
 
-      const nextLowStock = Array.isArray(lowStockRows) ? lowStockRows : []
+      const nextLowStock = Array.isArray(lowStockRows?.data) ? lowStockRows.data : []
       setLowStockProducts((previous) => (areProductsEqual(previous, nextLowStock) ? previous : nextLowStock))
 
       const latest = nextLowStock.length
@@ -92,17 +118,43 @@ export default function DashboardPage({ token, pushToast }: Props) {
       }
       setKpis((previous) => (areKpisEqual(previous, nextKpis) ? previous : nextKpis))
     } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        return
+      }
       pushToast('error', `Dashboard load failed: ${(error as Error).message}`)
     } finally {
+      if (activeAbortControllerRef.current === controller) {
+        activeAbortControllerRef.current = null
+      }
       if (showLoader || !hasLoadedDashboardRef.current) {
         setLoading(false)
         hasLoadedDashboardRef.current = true
       }
     }
-  }, [pushToast, query, token])
+  }, [lowStockQuery, pushToast, query, token])
+
+  useEffect(() => {
+    if (docType && !filterOptions.documentTypes.includes(docType)) {
+      setDocType('')
+    }
+    if (status && !filterOptions.statuses.includes(status)) {
+      setStatus('')
+    }
+    if (warehouse && !filterOptions.warehouses.includes(warehouse)) {
+      setWarehouse('')
+    }
+    if (category && !filterOptions.categories.includes(category)) {
+      setCategory('')
+    }
+  }, [category, docType, filterOptions, status, warehouse])
 
   useEffect(() => {
     void loadDashboard(!hasLoadedDashboardRef.current)
+    return () => {
+      if (activeAbortControllerRef.current) {
+        activeAbortControllerRef.current.abort()
+      }
+    }
   }, [loadDashboard])
 
   useLivePolling(
@@ -113,8 +165,48 @@ export default function DashboardPage({ token, pushToast }: Props) {
       enabled: Boolean(token),
       immediate: false,
       intervalMs: LIVE_SYNC_INTERVAL_MS,
+      backoffOnError: true,
+      maxIntervalMs: 60_000,
     },
   )
+
+  const buildProductsSearch = useCallback((includeLowStockOnly: boolean) => {
+    const params = new URLSearchParams()
+    if (category) params.set('category', category)
+    if (warehouse) params.set('location', warehouse)
+    if (includeLowStockOnly) params.set('lowStockOnly', 'true')
+    const serialized = params.toString()
+    return serialized ? `?${serialized}` : ''
+  }, [category, warehouse])
+
+  const buildOperationsSearch = useCallback((defaultStatus: string | null = null) => {
+    const params = new URLSearchParams()
+    const nextStatus = status || defaultStatus
+    if (nextStatus) params.set('status', nextStatus)
+    if (warehouse) params.set('search', warehouse)
+    const serialized = params.toString()
+    return serialized ? `?${serialized}` : ''
+  }, [status, warehouse])
+
+  const goToProducts = useCallback(() => {
+    navigate(`/products${buildProductsSearch(false)}`)
+  }, [buildProductsSearch, navigate])
+
+  const goToLowStockProducts = useCallback(() => {
+    navigate(`/products${buildProductsSearch(true)}`)
+  }, [buildProductsSearch, navigate])
+
+  const goToPendingReceipts = useCallback(() => {
+    navigate(`/operations/receipts${buildOperationsSearch(null)}`)
+  }, [buildOperationsSearch, navigate])
+
+  const goToPendingDeliveries = useCallback(() => {
+    navigate(`/operations/deliveries${buildOperationsSearch(null)}`)
+  }, [buildOperationsSearch, navigate])
+
+  const goToPendingTransfers = useCallback(() => {
+    navigate(`/operations/transfers${buildOperationsSearch(null)}`)
+  }, [buildOperationsSearch, navigate])
 
   const activeFilters = [docType, status, warehouse, category].filter(Boolean).length
 
@@ -146,14 +238,14 @@ export default function DashboardPage({ token, pushToast }: Props) {
         </div>
         <div className="filters-row">
           {[
-            { label: 'Document Type', value: docType,   set: setDocType,   opts: filterOptions.documentTypes },
-            { label: 'Status',        value: status,    set: setStatus,    opts: filterOptions.statuses      },
-            { label: 'Warehouse',     value: warehouse, set: setWarehouse, opts: filterOptions.warehouses    },
-            { label: 'Category',      value: category,  set: setCategory,  opts: filterOptions.categories    },
-          ].map(({ label, value, set, opts }) => (
+            { id: 'dashboard-filter-document-type', label: 'Document Type', value: docType, set: setDocType, opts: filterOptions.documentTypes },
+            { id: 'dashboard-filter-status', label: 'Status', value: status, set: setStatus, opts: filterOptions.statuses },
+            { id: 'dashboard-filter-warehouse', label: 'Warehouse', value: warehouse, set: setWarehouse, opts: filterOptions.warehouses },
+            { id: 'dashboard-filter-category', label: 'Category', value: category, set: setCategory, opts: filterOptions.categories },
+          ].map(({ id, label, value, set, opts }) => (
             <div key={label} className="filter-group">
-              <label className="filter-label">{label}</label>
-              <select className="form-select" value={value} onChange={(e) => set(e.target.value)}>
+              <label className="filter-label" htmlFor={id}>{label}</label>
+              <select id={id} className="form-select" value={value} onChange={(e) => set(e.target.value)}>
                 <option value="">All</option>
                 {opts.map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
@@ -181,33 +273,33 @@ export default function DashboardPage({ token, pushToast }: Props) {
             label="Total Products in Stock"
             value={kpis.totalProductsInStock}
             icon="box"
-            onClick={() => navigate('/products')}
+            onClick={goToProducts}
           />
           <KpiCard
             label="Low / Out of Stock"
             value={kpis.lowOrOutOfStockItems}
             icon="alert"
             variant="warning"
-            onClick={() => navigate('/products?lowStockOnly=true')}
+            onClick={goToLowStockProducts}
           />
           <KpiCard
             label="Pending Receipts"
             value={kpis.pendingReceipts}
             icon="receipt"
-            onClick={() => navigate('/operations/receipts?status=Waiting')}
+            onClick={goToPendingReceipts}
           />
           <KpiCard
             label="Pending Deliveries"
             value={kpis.pendingDeliveries}
             icon="truck"
-            onClick={() => navigate('/operations/deliveries?status=Waiting')}
+            onClick={goToPendingDeliveries}
           />
           <KpiCard
             label="Transfers Scheduled"
             value={kpis.scheduledInternalTransfers}
             icon="transfer"
             variant="success"
-            onClick={() => navigate('/operations/transfers?status=Ready')}
+            onClick={goToPendingTransfers}
           />
         </div>
       </div>

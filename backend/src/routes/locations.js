@@ -45,11 +45,25 @@ router.post('/', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
 router.get('/:id/inventory', requireAuth, async (req, res) => {
   const locationId = Number(req.params.id)
   if (!Number.isFinite(locationId)) return res.status(400).json({ message: 'Invalid location id' })
+  const page = Math.max(1, parseInt(req.query.page || '1', 10))
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10)))
+  const offset = (page - 1) * limit
 
   try {
     const db = await getDb()
-    const location = await db.get('SELECT id FROM Locations WHERE id = ?', locationId)
+    const location = await db.get('SELECT id, type FROM Locations WHERE id = ?', locationId)
     if (!location) return res.status(404).json({ message: 'Location not found' })
+    if (!String(location.type || '').trim().toLowerCase().startsWith('internal')) {
+      return res.status(400).json({ message: 'Inventory view is available only for internal warehouses' })
+    }
+
+    const countRow = await db.get(
+      `SELECT COUNT(*)::INT AS total
+         FROM Stock_Quants sq
+         JOIN Products p ON p.id = sq.product_id
+        WHERE sq.location_id = ?`,
+      locationId,
+    )
 
     const rows = await db.all(
       `SELECT p.id AS product_id,
@@ -61,12 +75,19 @@ router.get('/:id/inventory', requireAuth, async (req, res) => {
          FROM Stock_Quants sq
          JOIN Products p ON p.id = sq.product_id
         WHERE sq.location_id = ?
-          AND COALESCE(sq.quantity, 0) > 0
-        ORDER BY p.name ASC`,
+        ORDER BY p.name ASC
+        LIMIT ? OFFSET ?`,
       locationId,
+      limit,
+      offset,
     )
 
-    return res.json(rows)
+    return res.json({
+      data: rows,
+      total: Number(countRow?.total || 0),
+      page,
+      limit,
+    })
   } catch {
     return res.status(500).json({ message: 'Failed to load location inventory' })
   }

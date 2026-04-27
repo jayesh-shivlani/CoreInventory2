@@ -45,6 +45,9 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const [loading,  setLoading]  = useState(true)
   const [saving,   setSaving]   = useState(false)
   const [products, setProducts] = useState<Product[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const LIMIT = 15
   const [filterOptions, setFilterOptions] = useState<ProductFilterOptions>({ categories: [], locations: [], uoms: [] })
   const [editingProductId, setEditingProductId]                   = useState<number | null>(null)
   const [expandedProductId, setExpandedProductId]                 = useState<number | null>(null)
@@ -74,7 +77,6 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     location: string
     lowStockOnly: boolean
   } | null>(null)
-  const productsCacheRef = useRef<Record<string, Product[]>>({})
   // const initialWarehouseSelectRef = useRef<HTMLSelectElement | null>(null)
 
   useEffect(() => {
@@ -110,7 +112,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   const startEdit = (p: Product) => {
     if (!canManage) { pushToast('info', 'Only admin-approved roles can change products.'); return }
     setEditingProductId(p.id); setName(p.name); setSku(p.sku); setCategory(p.category)
-    setUom(/^units\s*units$/i.test(p.unit_of_measure.trim()) ? 'Units' : p.unit_of_measure)
+    setUom(p.unit_of_measure)
     setReorderMin(String(safeNumber(p.reorder_minimum))); setInitialStock('0')
     setViewMode('form')
   }
@@ -127,16 +129,20 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
       if (filterCategory.trim()) params.set('category',     filterCategory.trim())
       if (filterLocation.trim()) params.set('location',     filterLocation.trim())
       if (lowStockOnly)          params.set('lowStockOnly', 'true')
+      params.set('page', String(page))
+      params.set('limit', String(LIMIT))
       const q = params.toString() ? `?${params.toString()}` : ''
-      const cacheKey = q || '__all__'
-      const cachedProducts = productsCacheRef.current[cacheKey]
-      if (cachedProducts) {
-        setProducts((previous) => (areProductsEqual(previous, cachedProducts) ? previous : cachedProducts))
-      }
-      const data = await apiRequest<Product[]>(`/products${q}`, 'GET', token ?? undefined)
-      const nextProducts = Array.isArray(data) ? data : []
-      productsCacheRef.current[cacheKey] = nextProducts
+      const data = await apiRequest<{ data: Product[], total: number }>(`/products${q}`, 'GET', token ?? undefined)
+      const nextProducts = Array.isArray(data?.data) ? data.data.map(p => ({
+        ...p,
+        sku: p.sku.replace(/^(.*?)\1$/, '$1'),
+        category: p.category.replace(/^(.*?)\1$/, '$1'),
+        unit_of_measure: /^units\s*units$/i.test(p.unit_of_measure.trim()) ? 'Units' : p.unit_of_measure
+      })) : []
+      const nextTotal = typeof data?.total === 'number' ? data.total : 0
+      
       setProducts((previous) => (areProductsEqual(previous, nextProducts) ? previous : nextProducts))
+      setTotal(nextTotal)
     } catch (err) {
       pushToast('error', (err as Error).message)
     } finally {
@@ -145,7 +151,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
         hasLoadedProductsRef.current = true
       }
     }
-  }, [debouncedSearch, filterCategory, filterLocation, lowStockOnly, token, pushToast])
+  }, [debouncedSearch, filterCategory, filterLocation, lowStockOnly, page, token, pushToast])
 
   const loadFilterOptions = useCallback(async () => {
     try {
@@ -168,6 +174,17 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
   useEffect(() => {
     void load(!hasLoadedProductsRef.current)
   }, [load])
+
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, filterCategory, filterLocation, lowStockOnly])
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(total / LIMIT))
+    if (page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [total, page])
 
   useLivePolling(
     async () => {
@@ -210,6 +227,26 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
     }
   }, [search, debouncedSearch, filterCategory, filterLocation, lowStockOnly, location.pathname, location.search, navigate])
 
+  const productGuidelines = useMemo(() => [
+    ['SKU', 'Use a unique and searchable code.'],
+    ['Reorder', 'Triggers low-stock visibility in lists.'],
+    ['Category', 'Used in dashboard and filtering.'],
+    ['Initial Stock', 'Available only for new products.'],
+  ], [])
+
+  const guidelineChecklist = useMemo(() => {
+    const parsedInitial = Number(initialStock)
+    const hasRequiredFields = Boolean(name.trim() && sku.trim() && category.trim() && uom.trim())
+    const stockValuesOk = !Number.isNaN(parsedInitial) && !Number.isNaN(Number(reorderMin)) && parsedInitial >= 0 && Number(reorderMin) >= 0
+    const initialWarehouseOk = parsedInitial <= 0 || Boolean(initialWarehouseId)
+
+    return [
+      ['Required fields completed', hasRequiredFields],
+      ['Stock values are valid', stockValuesOk],
+      ['Initial warehouse selected if stock > 0', initialWarehouseOk],
+    ] as [string, boolean][]
+  }, [name, sku, category, uom, initialStock, reorderMin, initialWarehouseId])
+
   const categoryOptions = useMemo(
     () => Array.from(new Set([...DEFAULT_CATEGORIES, ...filterOptions.categories, category].filter(Boolean))),
     [filterOptions.categories, category],
@@ -219,7 +256,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
       new Set(
         [...DEFAULT_UOMS, ...filterOptions.uoms, uom]
           .map((value) => value.trim())
-          .filter((value) => value.length > 0 && !/^units\s*units$/i.test(value)),
+          .filter((value) => value.length > 0 && !/^units\s*units$/i.test(value) && value.toLowerCase() !== 'unit'),
       ),
     ),
     [filterOptions.uoms, uom],
@@ -377,7 +414,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
           <div className="list-card product-filter-card">
             <div className="list-header">
               <h2>Filter Products</h2>
-              <button type="button" className="btn btn-secondary" onClick={() => { setSearch(''); setFilterCategory(''); setFilterLocation(''); setLowStockOnly(false) }} disabled={activeCount === 0}>
+              <button type="button" className="btn btn-secondary" onClick={() => { setSearch(''); setFilterCategory(''); setFilterLocation(''); setLowStockOnly(false); setPage(1) }} disabled={activeCount === 0}>
                 Reset
               </button>
             </div>
@@ -398,9 +435,11 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                 <select className="form-select" value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}>
                   <option value="">All locations</option>
                   {Array.isArray(filterOptions.locations) && filterOptions.locations.length > 0 &&
-                    (filterOptions.locations as unknown as LocationOption[]).map((loc) => (
-                      <option key={loc.id || loc.name} value={loc.id || loc.name}>
-                        {loc.name}
+                    (filterOptions.locations as unknown as LocationOption[])
+                      .filter((loc) => loc && typeof loc === 'object' && String(loc.type || '').trim().toLowerCase().startsWith('internal'))
+                      .map((loc) => (
+                      <option key={loc.id || loc.name} value={String(loc.name || '').trim()}>
+                        {String(loc.name || '').trim()}
                       </option>
                     ))}
                 </select>
@@ -410,7 +449,7 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                   <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />
                   Low stock only
                 </label>
-                <button type="button" className="btn btn-primary" onClick={() => void load(false, search)}>Apply</button>
+                <button type="button" className="btn btn-primary" onClick={() => { setPage(1); void load(false, search) }}>Apply</button>
               </div>
             </div>
           </div>
@@ -455,15 +494,26 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                         <td>{safeNumber(p.availableStock)}</td>
                         <td>{p.locationName ?? '-'}</td>
                         <td>
-                          <span className={`badge ${safeNumber(p.availableStock) <= safeNumber(p.reorder_minimum) ? 'badge-waiting' : 'badge-done'}`}>
-                            {safeNumber(p.availableStock) <= safeNumber(p.reorder_minimum) ? 'Low Stock' : 'In Stock'}
+                          <span className={`badge ${safeNumber(p.availableStock) <= 0 ? 'badge-danger' : safeNumber(p.availableStock) <= safeNumber(p.reorder_minimum) ? 'badge-waiting' : 'badge-done'}`}>
+                            {safeNumber(p.availableStock) <= 0 ? 'Out of Stock' : safeNumber(p.availableStock) <= safeNumber(p.reorder_minimum) ? 'Low Stock' : 'In Stock'}
                           </span>
                         </td>
                         <td className="product-actions-cell">
-                          {canManage && <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(p)}>Edit</button>}
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void toggleStock(p.id)}>
-                            {expandedProductId === p.id ? 'Hide Stock' : 'View Stock'}
-                          </button>
+                          <div className="action-menu">
+                            <button type="button" className="btn-icon" aria-label="Actions">
+                              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="1"></circle>
+                                <circle cx="12" cy="5" r="1"></circle>
+                                <circle cx="12" cy="19" r="1"></circle>
+                              </svg>
+                            </button>
+                            <div className="action-menu-dropdown">
+                              {canManage && <button type="button" onClick={() => startEdit(p)}>Edit</button>}
+                              <button type="button" onClick={() => void toggleStock(p.id)}>
+                                {expandedProductId === p.id ? 'Hide Stock' : 'View Stock'}
+                              </button>
+                            </div>
+                          </div>
                         </td>
                       </tr>
                       {expandedProductId === p.id && (
@@ -495,6 +545,13 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                   ))}
                 </tbody>
               </table>
+              {total > LIMIT && (
+                <div className="pagination-controls">
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Previous</button>
+                  <span className="pagination-info">Page {page} of {Math.ceil(total / LIMIT)}</span>
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={page >= Math.ceil(total / LIMIT)} onClick={() => setPage(p => p + 1)}>Next</button>
+                </div>
+              )}
             </div>
           </div>
         </>
@@ -518,7 +575,40 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
               </div>
             )}
           </div>
-          <div className="product-form-grid">
+          <div className="operation-form-grid">
+            <div className="op-guidelines-banner">
+              <div className="op-guidelines-banner-header">
+                <span className="op-guidelines-banner-title">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                    <path fillRule="evenodd" d="M18 10A8 8 0 1 1 2 10a8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
+                  </svg>
+                  Product Guidelines
+                </span>
+              </div>
+              <div className="op-guidelines-banner-body">
+                <div className="op-checklist-col">
+                  <span className="op-checklist-label">Pre-submit checklist</span>
+                  {guidelineChecklist.map(([label, done]) => (
+                    <div
+                      key={`product-chk-${label}`}
+                      className={`op-checklist-item ${done ? 'is-done' : 'is-pending'}`}
+                    >
+                      <span className="op-checklist-dot" />
+                      {done ? '✓ ' : ''}{label}
+                    </div>
+                  ))}
+                </div>
+                <div className="op-guideline-cards-scroll">
+                  {productGuidelines.map(([title, body]) => (
+                    <div key={`product-card-${title}`} className="op-guideline-card">
+                      <span className="op-guideline-card-title">{title}</span>
+                      <span className="op-guideline-card-body">{body}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="form-sheet product-form-sheet">
               <div className="form-title-area">
                 <div className="form-doc-subtitle">{editingProductId ? 'Edit Product' : 'New Product'}</div>
@@ -540,10 +630,10 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                     >
                       <option value="" disabled hidden={!!initialWarehouseId}>Select initial warehouse</option>
                       {(filterOptions.locations as unknown as LocationOption[])
-                        .filter((loc) => loc && typeof loc === 'object' && (loc as LocationOption).type === 'Internal')
+                        .filter((loc) => loc && typeof loc === 'object' && String((loc as LocationOption).type || '').trim().toLowerCase().startsWith('internal'))
                         .map((loc) => (
                           <option key={(loc as LocationOption).id} value={(loc as LocationOption).id}>
-                            {(loc as LocationOption).name}
+                            {String((loc as LocationOption).name || '').trim()}
                           </option>
                         ))}
                     </select>
@@ -572,21 +662,6 @@ export default function ProductsPage({ token, pushToast, currentUser }: Props) {
                     <input className="form-input" type="number" min={0} value={initialStock} onChange={(e) => setInitialStock(e.target.value)} />
                   </div>
                 )}
-              </div>
-            </div>
-            <div className="panel-card product-form-meta">
-              <div className="panel-card-header">Guidelines</div>
-              <div className="panel-card-body">
-                <div className="info-grid">
-                  {[
-                    ['SKU',           'Use a unique and searchable code.'],
-                    ['Reorder',       'Triggers low-stock visibility in lists.'],
-                    ['Category',      'Used in dashboard and filtering.'],
-                    ['Initial Stock', 'Available only for new products.'],
-                  ].map(([dt, dd]) => (
-                    <div key={dt} className="info-item"><dt>{dt}</dt><dd>{dd}</dd></div>
-                  ))}
-                </div>
               </div>
             </div>
           </div>

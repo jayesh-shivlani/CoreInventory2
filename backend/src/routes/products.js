@@ -34,8 +34,8 @@ router.get('/filter-options', requireAuth, async (req, res) => {
     ])
     return res.json({
       categories: categories.map((x) => x.category).filter(Boolean),
-      locations:  locations.filter((x) => x && x.id && x.name && x.type),
-      uoms:       uoms.map((x) => x.unit_of_measure).filter(Boolean),
+      locations: locations.filter((x) => x && x.id && x.name && x.type),
+      uoms: uoms.map((x) => x.unit_of_measure).filter(Boolean),
     })
   } catch {
     return res.status(500).json({ message: 'Failed to load filter options' })
@@ -45,10 +45,13 @@ router.get('/filter-options', requireAuth, async (req, res) => {
 router.get('/', requireAuth, async (req, res) => {
   try {
     const db = await getDb()
-    const search       = String(req.query.search      || '').trim()
-    const category     = String(req.query.category    || '').trim()
-    const location     = String(req.query.location    || '').trim()
+    const search = String(req.query.search || '').trim()
+    const category = String(req.query.category || '').trim()
+    const location = String(req.query.location || '').trim()
     const lowStockOnly = req.query.lowStockOnly === 'true'
+    const page = Math.max(1, parseInt(req.query.page || '1', 10))
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10)))
+    const offset = (page - 1) * limit
 
     const conditions = []
     const values = []
@@ -62,30 +65,54 @@ router.get('/', requireAuth, async (req, res) => {
       values.push(category)
     }
     if (location) {
-      conditions.push('l.name = ?')
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM Stock_Quants sq_filter
+        JOIN Locations l_filter ON l_filter.id = sq_filter.location_id
+        WHERE sq_filter.product_id = p.id
+          AND LOWER(BTRIM(COALESCE(l_filter.type, ''))) LIKE 'internal%'
+          AND LOWER(BTRIM(COALESCE(l_filter.name, ''))) = LOWER(BTRIM(?))
+      )`)
       values.push(location)
     }
 
-    const where  = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
-    const having = lowStockOnly ? 'HAVING COALESCE(SUM(sq.quantity), 0) <= p.reorder_minimum' : ''
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+    const internalStockExpr = `COALESCE(SUM(CASE WHEN LOWER(BTRIM(COALESCE(l.type, ''))) LIKE 'internal%' THEN sq.quantity ELSE 0 END), 0)`
+    const having = lowStockOnly ? `HAVING ${internalStockExpr} <= p.reorder_minimum` : ''
 
-    const rows = await db.all(
-      `SELECT
+    const rowsQuery = `
+       SELECT
          p.id, p.name, p.sku, p.category, p.unit_of_measure, p.reorder_minimum,
-         COALESCE(SUM(sq.quantity), 0)  AS "availableStock",
-         MAX(l.name)                    AS "locationName"
+         ${internalStockExpr} AS "availableStock",
+         STRING_AGG(DISTINCT CASE WHEN LOWER(BTRIM(COALESCE(l.type, ''))) LIKE 'internal%' THEN BTRIM(l.name) END, ', ') AS "locationName"
        FROM Products p
        LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
        LEFT JOIN Locations l    ON l.id = sq.location_id
        ${where}
        GROUP BY p.id, p.name, p.sku, p.category, p.unit_of_measure, p.reorder_minimum
        ${having}
-       ORDER BY p.name ASC`,
-      ...values,
-    )
+       ORDER BY p.name ASC
+       LIMIT ? OFFSET ?
+    `
+    const rows = await db.all(rowsQuery, ...values, limit, offset)
 
-    return res.json(rows)
-  } catch {
+    const countQuery = `
+       SELECT COUNT(*) as total FROM (
+         SELECT p.id
+         FROM Products p
+         LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
+         LEFT JOIN Locations l    ON l.id = sq.location_id
+         ${where}
+         GROUP BY p.id, p.name, p.sku, p.category, p.unit_of_measure, p.reorder_minimum
+         ${having}
+       ) sub
+    `
+    const countRow = await db.get(countQuery, ...values)
+    const total = countRow ? Number(countRow.total) : 0
+
+    return res.json({ data: rows, total })
+  } catch (err) {
+    console.error(err)
     return res.status(500).json({ message: 'Failed to load products' })
   }
 })
@@ -102,6 +129,7 @@ router.get('/:id/stock', requireAuth, async (req, res) => {
        FROM Stock_Quants sq
        JOIN Locations l ON l.id = sq.location_id
        WHERE sq.product_id = ?
+         AND LOWER(BTRIM(COALESCE(l.type, ''))) LIKE 'internal%'
        ORDER BY l.name`,
       productId,
     )
@@ -137,7 +165,7 @@ router.post('/', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
       return res.status(400).json({ message: 'name, sku, category and unit_of_measure are required' })
     }
 
-    const stock   = safeNum(initial_stock)
+    const stock = safeNum(initial_stock)
     const reorder = safeNum(reorder_minimum)
     if (stock < 0 || reorder < 0) {
       return res.status(400).json({ message: 'Stock values must be non-negative' })
@@ -145,13 +173,18 @@ router.post('/', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => {
 
     const db = await getDb()
 
-    const existing = await db.get('SELECT id FROM Products WHERE sku = ?', String(sku).trim())
+    const cleanName = String(name).trim()
+    const cleanSku = String(sku).trim().replace(/^(.*?)\1$/, '$1') // Very basic deduplication
+    const cleanCategory = String(category).trim().replace(/^(.*?)\1$/, '$1')
+    const cleanUom = String(unit_of_measure).trim().replace(/^units\s*units$/i, 'Units')
+
+    const existing = await db.get('SELECT id FROM Products WHERE sku = ?', cleanSku)
     if (existing) return res.status(409).json({ message: 'SKU already exists' })
 
     const result = await db.transaction(async (tx) => {
       const inserted = await tx.run(
         'INSERT INTO Products (name, sku, category, unit_of_measure, reorder_minimum) VALUES (?, ?, ?, ?, ?)',
-        String(name).trim(), String(sku).trim(), String(category).trim(), String(unit_of_measure).trim(), reorder,
+        cleanName, cleanSku, cleanCategory, cleanUom, reorder,
       )
 
       if (stock > 0) {
@@ -199,15 +232,20 @@ router.put('/:id', requireAuth, requireRole(MANAGER_ROLES), async (req, res) => 
 
     const db = await getDb()
 
+    const cleanName = String(name).trim()
+    const cleanSku = String(sku).trim().replace(/^(.*?)\1$/, '$1') // Very basic deduplication
+    const cleanCategory = String(category).trim().replace(/^(.*?)\1$/, '$1')
+    const cleanUom = String(unit_of_measure).trim().replace(/^units\s*units$/i, 'Units')
+
     const existing = await db.get('SELECT id FROM Products WHERE id = ?', productId)
     if (!existing) return res.status(404).json({ message: 'Product not found' })
 
-    const conflict = await db.get('SELECT id FROM Products WHERE sku = ? AND id <> ?', String(sku).trim(), productId)
+    const conflict = await db.get('SELECT id FROM Products WHERE sku = ? AND id <> ?', cleanSku, productId)
     if (conflict) return res.status(409).json({ message: 'SKU already in use' })
 
     await db.run(
       'UPDATE Products SET name=?, sku=?, category=?, unit_of_measure=?, reorder_minimum=? WHERE id=?',
-      String(name).trim(), String(sku).trim(), String(category).trim(), String(unit_of_measure).trim(), reorder, productId,
+      cleanName, cleanSku, cleanCategory, cleanUom, reorder, productId,
     )
 
     return res.json({ message: 'Product updated', id: productId })

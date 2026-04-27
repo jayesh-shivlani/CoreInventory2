@@ -29,6 +29,7 @@ export async function apiRequest<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
   token?: string,
   payload?: unknown,
+  options?: { signal?: AbortSignal },
 ): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method,
@@ -37,6 +38,7 @@ export async function apiRequest<T>(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: payload ? JSON.stringify(payload) : undefined,
+    signal: options?.signal,
   })
 
   let body: unknown = null

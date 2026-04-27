@@ -985,7 +985,87 @@ a { text-decoration: none; color: inherit; }
   background: var(--accent-light);
 }
 
-/* --- List Card ---------------------------------------------- */
+/* --- Pagination Controls --- */
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* --- Action Menu Dropdown --- */
+.action-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.action-menu .btn-icon {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  padding: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-menu .btn-icon:hover,
+.action-menu .btn-icon:focus {
+  background: #f0f0f0;
+  color: var(--text);
+}
+
+.action-menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  min-width: 140px;
+  z-index: 100;
+  display: none;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.action-menu:hover .action-menu-dropdown,
+.action-menu:focus-within .action-menu-dropdown {
+  display: flex;
+}
+
+.action-menu-dropdown button {
+  background: transparent;
+  border: none;
+  padding: 8px 16px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s;
+}
+
+.action-menu-dropdown button:hover {
+  background: #f6f7f9;
+  color: var(--accent);
+}
+
+/* --- Lists & Data Tables ------------------------------------ */
 .list-card {
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -1193,6 +1273,7 @@ a { text-decoration: none; color: inherit; }
 .badge-ready   { background: #e3f2fd; color: #1565c0; }
 .badge-done    { background: #e8f5e9; color: #2e7d32; }
 .badge-canceled{ background: #fce4ec; color: #c62828; }
+.badge-danger  { background: #fee2e2; color: #b91c1c; font-weight: 700; }
 
 /* --- KPI Dashboard ------------------------------------------ */
 .dashboard-header-card {

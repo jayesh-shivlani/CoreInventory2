@@ -158,6 +158,13 @@ export type WarehouseInventoryRow = {
   reorder_minimum?: number
 }
 
+export type PaginatedWarehouseInventoryResponse = {
+  data: WarehouseInventoryRow[]
+  total: number
+  page: number
+  limit: number
+}
+
 export type AnalyticsOverview = {
   dailyMovements: Array<{
     date: string

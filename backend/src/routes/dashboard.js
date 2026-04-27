@@ -8,8 +8,16 @@
 const express = require('express')
 const { requireAuth } = require('../auth')
 const { getDb } = require('../db')
+const { withTimeout } = require('../utils/withTimeout')
 
 const router = express.Router()
+const DASHBOARD_QUERY_TIMEOUT_MS = 7000
+const FILTER_CACHE_TTL_MS = 5 * 60 * 1000
+
+const filterCache = {
+  expiresAt: 0,
+  payload: null,
+}
 
 router.get('/kpis', requireAuth, async (req, res) => {
   try {
@@ -28,26 +36,34 @@ router.get('/kpis', requireAuth, async (req, res) => {
     const productWhere = productConditions.length ? `WHERE ${productConditions.join(' AND ')}` : ''
 
     const [totalRow, lowRow] = await Promise.all([
-      db.get(
-        `SELECT COALESCE(SUM(sq.quantity), 0)::INT AS "totalProductsInStock"
-         FROM Stock_Quants sq
-         JOIN Products  p ON p.id  = sq.product_id
-         JOIN Locations l ON l.id  = sq.location_id
-         ${productWhere}`,
-        ...productValues,
+      withTimeout(
+        db.get(
+          `SELECT COALESCE(SUM(sq.quantity), 0)::INT AS "totalProductsInStock"
+           FROM Stock_Quants sq
+           JOIN Products  p ON p.id  = sq.product_id
+           JOIN Locations l ON l.id  = sq.location_id
+           ${productWhere}`,
+          ...productValues,
+        ),
+        DASHBOARD_QUERY_TIMEOUT_MS,
+        'Dashboard total stock query timed out',
       ),
-      db.get(
-        `SELECT COUNT(*)::INT AS "lowOrOutOfStockItems"
-         FROM (
-           SELECT p.id, p.reorder_minimum, COALESCE(SUM(sq.quantity), 0) AS total_qty
-           FROM Products p
-           LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
-           LEFT JOIN Locations    l  ON l.id = sq.location_id
-           ${productWhere}
-           GROUP BY p.id, p.reorder_minimum
-           HAVING COALESCE(SUM(sq.quantity), 0) <= p.reorder_minimum
-         ) t`,
-        ...productValues,
+      withTimeout(
+        db.get(
+          `SELECT COUNT(*)::INT AS "lowOrOutOfStockItems"
+           FROM (
+             SELECT p.id, p.reorder_minimum, COALESCE(SUM(sq.quantity), 0) AS total_qty
+             FROM Products p
+             LEFT JOIN Stock_Quants sq ON sq.product_id = p.id
+             LEFT JOIN Locations    l  ON l.id = sq.location_id
+             ${productWhere}
+             GROUP BY p.id, p.reorder_minimum
+             HAVING COALESCE(SUM(sq.quantity), 0) <= p.reorder_minimum
+           ) t`,
+          ...productValues,
+        ),
+        DASHBOARD_QUERY_TIMEOUT_MS,
+        'Dashboard low stock query timed out',
       ),
     ])
 
@@ -59,30 +75,29 @@ router.get('/kpis', requireAuth, async (req, res) => {
     if (warehouse)    { opConditions.push('(src.name ILIKE ? OR dst.name ILIKE ?)'); opValues.push(`%${warehouse}%`, `%${warehouse}%`) }
     const opFilter = opConditions.length ? `AND ${opConditions.join(' AND ')}` : ''
 
-    const buildOpQuery = () => `
-      SELECT COUNT(*)::INT AS cnt
+    const opQuery = `
+      SELECT o.type, COUNT(*)::INT AS cnt
       FROM Operations o
       LEFT JOIN Locations src ON src.id = o.source_location_id
       LEFT JOIN Locations dst ON dst.id = o.destination_location_id
-      WHERE o.type = ?
-        AND o.status IN ('Draft', 'Waiting', 'Ready')
-        ${opFilter}`
+      WHERE o.status IN ('Draft', 'Waiting', 'Ready')
+        ${opFilter}
+      GROUP BY o.type`
 
-    const opQuery = buildOpQuery()
-    const getOpCount = (type) => db.get(opQuery, type, ...opValues)
+    const opRows = await withTimeout(
+      db.all(opQuery, ...opValues),
+      DASHBOARD_QUERY_TIMEOUT_MS,
+      'Dashboard operation counts query timed out',
+    )
 
-    const [receiptRow, deliveryRow, internalRow] = await Promise.all([
-      getOpCount('Receipt'),
-      getOpCount('Delivery'),
-      getOpCount('Internal'),
-    ])
+    const opCountByType = new Map(opRows.map((row) => [String(row.type || ''), Number(row.cnt || 0)]))
 
     return res.json({
       totalProductsInStock:       Number(totalRow?.totalProductsInStock   || 0),
       lowOrOutOfStockItems:       Number(lowRow?.lowOrOutOfStockItems       || 0),
-      pendingReceipts:            Number(receiptRow?.cnt                   || 0),
-      pendingDeliveries:          Number(deliveryRow?.cnt                  || 0),
-      scheduledInternalTransfers: Number(internalRow?.cnt                  || 0),
+      pendingReceipts:            opCountByType.get('Receipt') || 0,
+      pendingDeliveries:          opCountByType.get('Delivery') || 0,
+      scheduledInternalTransfers: opCountByType.get('Internal') || 0,
     })
   } catch (error) {
     console.error('[dashboard/kpis]', error)
@@ -92,18 +107,37 @@ router.get('/kpis', requireAuth, async (req, res) => {
 
 router.get('/filters', requireAuth, async (req, res) => {
   try {
+    if (filterCache.payload && Date.now() < filterCache.expiresAt) {
+      return res.json(filterCache.payload)
+    }
+
     const db = await getDb()
     const [warehouses, categories] = await Promise.all([
-      db.all('SELECT DISTINCT name FROM Locations ORDER BY name'),
-      db.all('SELECT DISTINCT category FROM Products ORDER BY category'),
+      withTimeout(
+        db.all("SELECT DISTINCT name FROM Locations WHERE LOWER(BTRIM(COALESCE(type, ''))) LIKE 'internal%' ORDER BY name"),
+        DASHBOARD_QUERY_TIMEOUT_MS,
+        'Dashboard warehouse filter query timed out',
+      ),
+      withTimeout(
+        db.all('SELECT DISTINCT category FROM Products ORDER BY category'),
+        DASHBOARD_QUERY_TIMEOUT_MS,
+        'Dashboard category filter query timed out',
+      ),
     ])
-    return res.json({
+
+    const payload = {
       documentTypes: ['Receipt', 'Delivery', 'Internal', 'Adjustment'],
       statuses:      ['Draft', 'Waiting', 'Ready', 'Done', 'Canceled'],
       warehouses:    warehouses.map((x) => x.name).filter(Boolean),
       categories:    categories.map((x) => x.category).filter(Boolean),
-    })
-  } catch {
+    }
+
+    filterCache.payload = payload
+    filterCache.expiresAt = Date.now() + FILTER_CACHE_TTL_MS
+
+    return res.json(payload)
+  } catch (error) {
+    console.error('[dashboard/filters]', error)
     return res.status(500).json({ message: 'Failed to load dashboard filters' })
   }
 })

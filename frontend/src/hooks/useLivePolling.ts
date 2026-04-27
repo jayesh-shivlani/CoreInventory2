@@ -5,6 +5,8 @@ type UseLivePollingOptions = {
   immediate?: boolean
   intervalMs: number
   runWhenHidden?: boolean
+  backoffOnError?: boolean
+  maxIntervalMs?: number
 }
 
 /**
@@ -17,6 +19,8 @@ export function useLivePolling(
     immediate = true,
     intervalMs,
     runWhenHidden = false,
+    backoffOnError = false,
+    maxIntervalMs,
   }: UseLivePollingOptions,
 ) {
   const taskRef = useRef(task)
@@ -32,6 +36,27 @@ export function useLivePolling(
 
     let cancelled = false
     let running = false
+    let timeoutId: number | null = null
+    let failureCount = 0
+
+    const getDelayMs = () => {
+      if (!backoffOnError) {
+        return intervalMs
+      }
+      const exponential = intervalMs * (2 ** failureCount)
+      const upperBound = Math.max(intervalMs, maxIntervalMs ?? intervalMs * 8)
+      return Math.min(exponential, upperBound)
+    }
+
+    const scheduleNext = () => {
+      if (cancelled) {
+        return
+      }
+      const delayMs = getDelayMs()
+      timeoutId = window.setTimeout(() => {
+        void execute()
+      }, delayMs)
+    }
 
     const execute = async () => {
       if (cancelled || running) {
@@ -44,18 +69,22 @@ export function useLivePolling(
       running = true
       try {
         await taskRef.current()
+        failureCount = 0
+      } catch {
+        if (backoffOnError) {
+          failureCount += 1
+        }
       } finally {
         running = false
+        scheduleNext()
       }
     }
 
     if (immediate) {
       void execute()
+    } else {
+      scheduleNext()
     }
-
-    const intervalId = window.setInterval(() => {
-      void execute()
-    }, intervalMs)
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -69,10 +98,12 @@ export function useLivePolling(
 
     return () => {
       cancelled = true
-      window.clearInterval(intervalId)
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
       if (!runWhenHidden) {
         document.removeEventListener('visibilitychange', handleVisibilityChange)
       }
     }
-  }, [enabled, immediate, intervalMs, runWhenHidden])
+  }, [enabled, immediate, intervalMs, runWhenHidden, backoffOnError, maxIntervalMs])
 }
